@@ -1,0 +1,15 @@
+[Unit]
+Description=Abuya Portal API
+After=network.target postgresql.service
+
+[Service]
+User=abuya
+Group=abuya
+WorkingDirectory=/var/www/abuya-portal/backend
+EnvironmentFile=/var/www/abuya-portal/backend/.env
+ExecStart=/var/www/abuya-portal/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2 --proxy-headers
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
