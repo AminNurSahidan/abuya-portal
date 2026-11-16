@@ -15,7 +15,7 @@
     <div class="brand-icon"><span class="material-symbols-outlined">hub</span></div>
     <div class="brand-text">
       <span class="brand-name">Abuya Portal</span>
-      <span class="brand-sub">Approval &amp; Inventory System</span>
+      <span class="brand-sub">Approval Layer</span>
     </div>
   </div>
   <div class="topbar-right">
@@ -37,20 +37,22 @@
         <span class="logo-badge"><span></span></span>
       </div>
       <h1>Masuk ke Abuya Portal</h1>
-      <p>Portal terpadu persetujuan PR/PO &amp; manajemen gudang Abuya Group</p>
+      <p>Multi-branch Approval System &amp; Authorization Routing Abuya Group</p>
     </div>
+
+    <div class="notice-box" id="sessionNotice" hidden></div>
 
     <form id="loginForm" class="form login-form" novalidate>
       <div class="field">
-        <label for="email">Email</label>
+        <label for="username">Username</label>
         <div class="input-wrap">
           <span class="material-symbols-outlined icon-left">badge</span>
-          <input id="email" type="email" placeholder="nama@abuyagroup.com" autocomplete="username" required>
+          <input id="username" type="text" placeholder="contoh: sm.bekasi" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required>
         </div>
       </div>
 
       <div class="field">
-        <label for="password">Kata Sandi</label>
+        <label for="password">Password</label>
         <div class="input-wrap">
           <span class="material-symbols-outlined icon-left">key</span>
           <input id="password" type="password" placeholder="••••••••••••" autocomplete="current-password" required>
@@ -82,7 +84,7 @@
     </div>
   </div>
 
-  <p class="help">Kendala akses? <a href="#" class="link strong">Hubungi Admin Operasional</a></p>
+  <p class="help">Kendala akses? <span class="strong-text">Hubungi Master Layer</span></p>
 </main>
 
 <footer class="footer">

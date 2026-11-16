@@ -1,0 +1,17 @@
+.detail-layout { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+
+.form-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+
+.form-section-head .card-title { margin: 0; }
+
+.form-actions { padding-top: 18px; border-top: 1px solid #f1f5f9; }
+
+.form-actions:empty { display: none; }
+
+.page-head h1 { font-family: "Plus Jakarta Sans", sans-serif; }
+
+.page-head p { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+@media (min-width: 1024px) {
+  .detail-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+}

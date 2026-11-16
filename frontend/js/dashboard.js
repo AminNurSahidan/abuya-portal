@@ -1,285 +1,185 @@
-const API_BASE = "/api";
-const TOKEN_KEY = "abuya_token";
-const LOGIN_PAGE = "login.html";
-
-const ROLE_LABELS = {
-  admin: "Admin",
-  am: "Area Manager",
-  amka: "AMKA",
-  approver: "Approver",
-  gudang: "Staff Gudang",
-  staff: "Staff"
-};
-
-const STAT_FIELDS = {
-  statPending: "pending_pr",
-  statPo: "po_this_month",
-  statLow: "low_stock",
-  statOpname: "opname_running"
+const STAT_ICONS = {
+  Pending: "pending_actions",
+  Approved: "task_alt",
+  Rejected: "block",
+  Expired: "event_busy"
 };
 
 const ACTIVITY_ICONS = {
-  auth: { icon: "login", cls: "slate" },
-  users: { icon: "manage_accounts", cls: "blue" },
-  master: { icon: "database", cls: "slate" },
-  approval: { icon: "approval", cls: "blue" },
-  inventory: { icon: "inventory_2", cls: "green" },
-  opname: { icon: "fact_check", cls: "slate" },
-  warning: { icon: "warning", cls: "amber" }
+  auth: { icon: "login", tone: "slate" },
+  approval: { icon: "approval", tone: "blue" },
+  users: { icon: "manage_accounts", tone: "green" },
+  master: { icon: "database", tone: "slate" }
 };
 
-const $ = (id) => document.getElementById(id);
+const filters = { branch: "", from: "", to: "" };
+let loadSeq = 0;
 
-const sidebar = $("sidebar");
-const overlay = $("overlay");
-const userBtn = $("userBtn");
-const userDropdown = $("userDropdown");
+bootApp(async (user) => {
+  $("todayDate").textContent = new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  $("greeting").textContent = greetingByHour();
+  $("heroName").textContent = user.username;
+  $("heroCreate").hidden = !canCreatePR(user);
+  $("mappingNotice").hidden = !hasNoMapping(user);
 
-init();
+  $("fBranch").addEventListener("change", (e) => { filters.branch = e.target.value; load(); });
+  $("fFrom").addEventListener("change", (e) => { filters.from = e.target.value; load(); });
+  $("fTo").addEventListener("change", (e) => { filters.to = e.target.value; load(); });
+  $("fReset").addEventListener("click", () => {
+    filters.branch = "";
+    filters.from = "";
+    filters.to = "";
+    $("fBranch").value = "";
+    $("fFrom").value = "";
+    $("fTo").value = "";
+    load();
+  });
 
-async function init() {
-  $("year").textContent = new Date().getFullYear();
-  renderDate();
-  bindUI();
+  renderStatSkeleton();
+  await load(true);
+});
 
-  if (!getToken()) {
-    window.location.replace(LOGIN_PAGE);
-    return;
-  }
-
+async function load(first) {
+  const seq = ++loadSeq;
+  $("fReset").hidden = !(filters.branch || filters.from || filters.to);
   try {
-    const user = await api("/auth/me");
-    renderUser(user);
-    document.body.classList.remove("is-loading");
-    const summary = await api("/dashboard/summary");
-    renderStats(summary.stats || {});
-    renderActivity(summary.activity || []);
-    renderBranches(summary.branches || []);
+    const data = await api("/dashboard/summary" + qs({
+      brand_id: activeBrandId(),
+      branch_id: filters.branch,
+      date_from: filters.from,
+      date_to: filters.to
+    }));
+    if (seq !== loadSeq) return;
+    if (first) fillBranchSelect($("fBranch"), data.branches, filters.branch, "Semua cabang");
+    renderStats(data);
+    renderExpiring(data.expiring);
+    renderTop($("topPo"), data.top_by_po, "x");
+    renderTop($("topQty"), data.top_by_qty, "");
+    renderActivity(data.activity);
+    renderBranches(data.branches);
   } catch (err) {
     if (err.status === 401) return;
-    document.body.classList.remove("is-loading");
-    renderActivityError();
-    renderBranchesError();
-    showToast(err.message || "Gagal memuat data.", true);
+    showToast(err.message, true);
   }
 }
 
-async function api(path, options = {}) {
-  const headers = Object.assign({ Authorization: "Bearer " + getToken() }, options.headers || {});
-  if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
-
-  let res;
-  try {
-    res = await fetch(API_BASE + path, Object.assign({}, options, { headers }));
-  } catch (e) {
-    const err = new Error("Gagal terhubung ke server.");
-    err.status = 0;
-    throw err;
-  }
-
-  if (res.status === 401) {
-    clearToken();
-    window.location.replace(LOGIN_PAGE);
-    const err = new Error("Sesi berakhir.");
-    err.status = 401;
-    throw err;
-  }
-
-  if (res.status === 204) return null;
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(typeof data.detail === "string" ? data.detail : "Terjadi kesalahan.");
-    err.status = res.status;
-    throw err;
-  }
-  return data;
+function renderStatSkeleton() {
+  const box = $("statCards");
+  box.innerHTML = "";
+  PR_STATUSES.forEach(() => box.appendChild(el("div", "skeleton stat-skel")));
 }
 
-function bindUI() {
-  $("menuBtn").addEventListener("click", () => toggleSidebar(true));
-  overlay.addEventListener("click", () => toggleSidebar(false));
-
-  userBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    userDropdown.classList.toggle("show");
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!userDropdown.contains(e.target)) userDropdown.classList.remove("show");
-  });
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      userDropdown.classList.remove("show");
-      toggleSidebar(false);
-    }
-  });
-
-  $("logoutBtn").addEventListener("click", logout);
-  $("logoutBtn2").addEventListener("click", logout);
-
-  $("searchInput").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.value.trim()) {
-      window.location.href = "search.html?q=" + encodeURIComponent(e.target.value.trim());
-    }
-  });
-
-  $("notifBtn").addEventListener("click", () => {
-    window.location.href = "purchase-request.html?status=pending";
+function renderStats(data) {
+  const box = $("statCards");
+  box.innerHTML = "";
+  PR_STATUSES.forEach((s) => {
+    const count = data.status_counts[s.key] || 0;
+    const a = el("a", "stat");
+    a.href = "purchase-request.html" + qs({ status: s.key, branch: filters.branch });
+    const ic = el("div", "stat-icon tone-" + s.tone);
+    ic.appendChild(icon_(STAT_ICONS[s.key]));
+    const body = el("div", "stat-body");
+    body.append(el("span", "stat-label", "PR " + s.label), el("span", "stat-value", formatNumber(count)));
+    const pct = data.total ? Math.round((count / data.total) * 100) : 0;
+    body.appendChild(el("span", "stat-pct", pct + "% dari " + formatNumber(data.total) + " PR"));
+    a.append(ic, body);
+    box.appendChild(a);
   });
 }
 
-function toggleSidebar(open) {
-  sidebar.classList.toggle("open", open);
-  overlay.classList.toggle("show", open);
-  document.documentElement.classList.toggle("no-scroll", open);
-  document.body.classList.toggle("no-scroll", open);
-}
-
-async function logout() {
-  try {
-    await api("/auth/logout", { method: "POST" });
-  } catch (e) {}
-  clearToken();
-  window.location.replace(LOGIN_PAGE);
-}
-
-function renderUser(user) {
-  const name = user.full_name || user.email.split("@")[0];
-  const firstName = name.split(" ")[0];
-
-  $("userName").textContent = name;
-  $("userRole").textContent = ROLE_LABELS[user.role] || user.role;
-  $("userEmail").textContent = user.email;
-  $("userAvatar").textContent = initials(name);
-  $("heroName").textContent = firstName;
-  $("greeting").textContent = greetingByHour();
-
-  if (user.role === "admin") {
-    document.querySelectorAll(".admin-only").forEach((el) => { el.hidden = false; });
+function renderExpiring(rows) {
+  const list = $("expiringList");
+  list.innerHTML = "";
+  $("expiringMeta").textContent = rows.length ? rows.length + " PR" : "";
+  if (!rows.length) {
+    const li = el("li");
+    li.appendChild(emptyBlock("event_available", "Tidak ada PR Pending yang expired besok."));
+    list.appendChild(li);
+    return;
   }
-}
-
-function renderStats(stats) {
-  Object.entries(STAT_FIELDS).forEach(([el, key]) => {
-    const v = stats[key];
-    $(el).textContent = typeof v === "number" ? formatNumber(v) : "-";
+  rows.forEach((r) => {
+    const li = el("li");
+    const a = el("a");
+    a.href = "purchase-request-detail.html?id=" + r.id;
+    const ic = el("span", "ex-icon");
+    ic.appendChild(icon_("timer"));
+    const body = el("span", "ex-body");
+    body.append(el("span", "ex-no", r.number), el("span", "ex-branch", r.branch));
+    const chev = icon_("chevron_right");
+    chev.classList.add("chev");
+    a.append(ic, body, chev);
+    li.appendChild(a);
+    list.appendChild(li);
   });
+}
 
-  const pending = stats.pending_pr;
-  if (typeof pending === "number" && pending > 0) {
-    const badge = $("navPendingBadge");
-    badge.textContent = pending > 99 ? "99+" : pending;
-    badge.hidden = false;
-    $("notifDot").hidden = false;
+function renderTop(list, rows, suffix) {
+  list.innerHTML = "";
+  if (!rows.length) {
+    const li = el("li");
+    li.appendChild(emptyBlock("bar_chart", "Belum ada data PO."));
+    list.appendChild(li);
+    return;
   }
+  const max = Math.max(...rows.map((r) => r.value), 1);
+  rows.forEach((r, i) => {
+    const li = el("li");
+    const bar = el("span", "top-bar");
+    const fill = el("span");
+    fill.style.width = Math.max(4, Math.round((r.value / max) * 100)) + "%";
+    bar.appendChild(fill);
+    const name = el("span", "top-name", r.item_name);
+    name.title = r.item_name;
+    li.append(el("span", "top-rank", String(i + 1)), name, bar, el("span", "top-value", formatNumber(r.value) + suffix));
+    list.appendChild(li);
+  });
 }
 
 function renderActivity(rows) {
   const list = $("activityList");
   list.innerHTML = "";
-
   if (!rows.length) {
-    list.appendChild(emptyState("history", "Belum ada aktivitas."));
+    const li = el("li");
+    li.appendChild(emptyBlock("history", "Belum ada aktivitas."));
+    list.appendChild(li);
     return;
   }
-
-  rows.forEach((row) => {
-    const conf = ACTIVITY_ICONS[row.module] || ACTIVITY_ICONS.approval;
-    const li = document.createElement("li");
-    li.className = "activity-item";
-
-    const icon = document.createElement("div");
-    icon.className = "activity-icon " + conf.cls;
-    const iconInner = document.createElement("span");
-    iconInner.className = "material-symbols-outlined";
-    iconInner.textContent = conf.icon;
-    icon.appendChild(iconInner);
-
-    const body = document.createElement("div");
-    body.className = "activity-body";
-
-    const text = document.createElement("p");
-    text.className = "activity-text";
-    const actor = document.createElement("strong");
-    actor.textContent = row.actor_name || "Sistem";
-    text.append(actor, " " + (row.description || ""));
-
-    const time = document.createElement("span");
-    time.className = "activity-time";
-    time.textContent = timeAgo(row.created_at);
-
-    body.append(text, time);
-    li.append(icon, body);
+  rows.forEach((r) => {
+    const conf = ACTIVITY_ICONS[r.module] || ACTIVITY_ICONS.approval;
+    const li = el("li");
+    const ic = el("div", "activity-icon tone-" + conf.tone);
+    ic.appendChild(icon_(conf.icon));
+    const body = el("div", "activity-body");
+    const text = el("p", "activity-text");
+    text.append(el("strong", "", r.actor_name), document.createTextNode(" " + r.description));
+    body.append(text, el("span", "activity-time", timeAgo(r.created_at)));
+    li.append(ic, body);
     list.appendChild(li);
   });
-}
-
-function renderActivityError() {
-  const list = $("activityList");
-  list.innerHTML = "";
-  list.appendChild(emptyState("history", "Aktivitas belum bisa dimuat."));
 }
 
 function renderBranches(rows) {
   const list = $("branchList");
   list.innerHTML = "";
-
+  const scoped = ["SM", "AM", "AMKA"].includes(App.user.role);
+  $("branchPanelTitle").textContent = scoped ? "Cabang saya" : "Cabang";
+  $("branchCount").textContent = rows.length ? rows.length + " cabang" : "";
   if (!rows.length) {
-    list.appendChild(emptyState("storefront", "Belum ada cabang yang di-assign."));
+    const li = el("li");
+    li.appendChild(emptyBlock("storefront", scoped ? "Belum ada cabang yang di-mapping." : "Belum ada cabang."));
+    list.appendChild(li);
     return;
   }
-
-  rows.forEach((b) => {
-    const li = document.createElement("li");
-    li.className = "branch-item";
-
-    const icon = document.createElement("span");
-    icon.className = "material-symbols-outlined";
-    icon.textContent = "storefront";
-
-    const name = document.createElement("span");
-    name.textContent = b.name || "-";
-
-    li.append(icon, name);
-
-    if (b.brand && b.brand.name) {
-      const brand = document.createElement("span");
-      brand.className = "branch-brand";
-      brand.textContent = b.brand.name;
-      li.appendChild(brand);
-    }
-
+  const limit = 8;
+  rows.slice(0, limit).forEach((b) => {
+    const li = el("li");
+    li.append(icon_("storefront"), el("span", "", b.name));
+    if (b.brand) li.appendChild(el("span", "brand-tag", b.brand.code));
     list.appendChild(li);
   });
-}
-
-function renderBranchesError() {
-  const list = $("branchList");
-  list.innerHTML = "";
-  list.appendChild(emptyState("storefront", "Data cabang belum bisa dimuat."));
-}
-
-function emptyState(iconName, msg) {
-  const li = document.createElement("li");
-  li.className = "empty";
-  const icon = document.createElement("span");
-  icon.className = "material-symbols-outlined";
-  icon.textContent = iconName;
-  const text = document.createElement("span");
-  text.textContent = msg;
-  li.append(icon, text);
-  return li;
-}
-
-function renderDate() {
-  $("todayDate").textContent = new Date().toLocaleDateString("id-ID", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
+  if (rows.length > limit) {
+    list.appendChild(el("li", "more", "+" + (rows.length - limit) + " cabang lainnya"));
+  }
 }
 
 function greetingByHour() {
@@ -288,48 +188,4 @@ function greetingByHour() {
   if (h < 15) return "Selamat siang";
   if (h < 18) return "Selamat sore";
   return "Selamat malam";
-}
-
-function initials(name) {
-  return name.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
-}
-
-function formatNumber(n) {
-  return new Intl.NumberFormat("id-ID").format(n);
-}
-
-function timeAgo(iso) {
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (diff < 60) return "Baru saja";
-  if (diff < 3600) return Math.floor(diff / 60) + " menit lalu";
-  if (diff < 86400) return Math.floor(diff / 3600) + " jam lalu";
-  if (diff < 604800) return Math.floor(diff / 86400) + " hari lalu";
-  return new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function getToken() {
-  return storageGet(localStorage, TOKEN_KEY) || storageGet(sessionStorage, TOKEN_KEY);
-}
-
-function clearToken() {
-  storageRemove(localStorage, TOKEN_KEY);
-  storageRemove(sessionStorage, TOKEN_KEY);
-}
-
-function storageGet(store, k) {
-  try { return store.getItem(k); } catch (e) { return null; }
-}
-
-function storageRemove(store, k) {
-  try { store.removeItem(k); } catch (e) {}
-}
-
-let toastTimer;
-function showToast(msg, isError) {
-  const t = $("toast");
-  t.textContent = msg;
-  t.classList.toggle("error", !!isError);
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 3000);
 }

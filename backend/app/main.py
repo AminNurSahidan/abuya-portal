@@ -1,12 +1,28 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.routers import auth, dashboard, master, users
+from app.database import Base, engine
+from app.routers import auth, dashboard, master, purchasing, users
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if settings.auto_create_tables:
+        from app.cli import ensure_default_brands
+
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            ensure_default_brands(db)
+            db.commit()
+    yield
+
 
 app = FastAPI(
     title="Abuya Portal API",
@@ -14,6 +30,7 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 if settings.cors_list:
@@ -28,6 +45,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(master.router)
 app.include_router(dashboard.router)
+app.include_router(purchasing.router)
 
 
 @app.get("/api/health", tags=["system"])

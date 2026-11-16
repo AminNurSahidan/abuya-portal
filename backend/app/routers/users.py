@@ -1,14 +1,14 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.activity import log_activity
 from app.database import get_db
-from app.deps import require_admin
-from app.models import Branch, User
-from app.schemas import PasswordReset, Role, UserCreate, UserList, UserOut, UserUpdate
+from app.deps import get_master
+from app.models import BRANCH_SCOPED_ROLES, Branch, Brand, User
+from app.schemas import MappingUpdate, PasswordReset, Role, UserBulkDelete, UserCreate, UserOut, UserUpdate
 from app.security import hash_password
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -21,105 +21,126 @@ def get_user_or_404(db: Session, user_id: uuid.UUID) -> User:
     return user
 
 
-def resolve_branches(db: Session, branch_ids: list[int]) -> list[Branch]:
-    ids = list(dict.fromkeys(branch_ids))
-    if not ids:
-        return []
-    branches = list(db.scalars(select(Branch).where(Branch.id.in_(ids))))
-    if len(branches) != len(ids):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ada cabang yang tidak ditemukan.")
-    return branches
+def validate_role_brand(db: Session, role: str, brand_id: int | None) -> int | None:
+    if role == "Master":
+        return None
+    if brand_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Brand wajib diisi untuk role selain Master.")
+    if db.get(Brand, brand_id) is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Brand tidak ditemukan.")
+    return brand_id
 
 
-@router.get("", response_model=UserList)
+@router.get("", response_model=list[UserOut])
 def list_users(
     q: str | None = None,
     role: Role | None = None,
-    active: bool | None = None,
-    page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    brand_id: int | None = None,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(get_master),
 ):
-    stmt = select(User)
-    if q:
-        like = f"%{q.strip().lower()}%"
-        stmt = stmt.where(or_(func.lower(User.email).like(like), func.lower(User.full_name).like(like)))
+    stmt = select(User).order_by(User.username)
+    if q and q.strip():
+        stmt = stmt.where(func.lower(User.username).like(f"%{q.strip().lower()}%"))
     if role:
         stmt = stmt.where(User.role == role)
-    if active is not None:
-        stmt = stmt.where(User.is_active == active)
-    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    items = db.scalars(stmt.order_by(User.full_name).offset((page - 1) * size).limit(size)).all()
-    return UserList(items=items, total=total, page=page, size=size)
+    if brand_id is not None:
+        stmt = stmt.where((User.brand_id == brand_id) | (User.brand_id.is_(None)))
+    return db.scalars(stmt).all()
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def create_user(data: UserCreate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    if db.scalar(select(User.id).where(User.email == data.email)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email sudah terdaftar.")
+def create_user(data: UserCreate, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    if db.scalar(select(User.id).where(User.username == data.username)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f'Username "{data.username}" sudah dipakai.')
     user = User(
-        email=data.email,
-        full_name=data.full_name.strip(),
-        role=data.role,
+        username=data.username,
         password_hash=hash_password(data.password),
+        role=data.role,
+        brand_id=validate_role_brand(db, data.role, data.brand_id),
     )
-    user.branches = resolve_branches(db, data.branch_ids)
     db.add(user)
-    log_activity(db, admin, "users", "create_user", f"menambahkan user {user.full_name}")
+    log_activity(db, master, "users", "create_user", f"menambahkan user {user.username} ({user.role})")
     db.commit()
     db.refresh(user)
     return user
 
 
-@router.get("/{user_id}", response_model=UserOut)
-def get_user(user_id: uuid.UUID, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    return get_user_or_404(db, user_id)
-
-
 @router.patch("/{user_id}", response_model=UserOut)
-def update_user(user_id: uuid.UUID, data: UserUpdate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def update_user(user_id: uuid.UUID, data: UserUpdate, db: Session = Depends(get_db), master: User = Depends(get_master)):
     user = get_user_or_404(db, user_id)
-    is_self = user.id == admin.id
+    if user.id == master.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tidak bisa mengubah akun sendiri lewat sini.")
 
-    if is_self and data.is_active is False:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tidak bisa menonaktifkan akun sendiri.")
-    if is_self and data.role is not None and data.role != "admin":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tidak bisa menurunkan role akun sendiri.")
+    role = data.role or user.role
+    brand_id = data.brand_id if data.brand_id is not None else user.brand_id
+    if data.role is not None or data.brand_id is not None:
+        new_brand = validate_role_brand(db, role, brand_id)
+        if role != user.role or new_brand != user.brand_id:
+            user.token_version += 1
+        if new_brand != user.brand_id:
+            user.branches = [b for b in user.branches if b.brand_id == new_brand]
+        user.role = role
+        user.brand_id = new_brand
+        if role not in BRANCH_SCOPED_ROLES:
+            user.branches = []
 
-    if data.full_name is not None:
-        user.full_name = data.full_name.strip()
-    if data.role is not None and data.role != user.role:
-        user.role = data.role
-        user.token_version += 1
     if data.is_active is not None and data.is_active != user.is_active:
         user.is_active = data.is_active
         if not data.is_active:
             user.token_version += 1
-    if data.branch_ids is not None:
-        user.branches = resolve_branches(db, data.branch_ids)
 
-    log_activity(db, admin, "users", "update_user", f"memperbarui user {user.full_name}")
+    log_activity(db, master, "users", "update_user", f"memperbarui user {user.username}")
     db.commit()
     db.refresh(user)
     return user
 
 
+@router.post("/delete", status_code=status.HTTP_204_NO_CONTENT)
+def delete_users(data: UserBulkDelete, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    if master.id in data.ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tidak bisa menghapus akun sendiri.")
+    users = db.scalars(select(User).where(User.id.in_(data.ids))).all()
+    for u in users:
+        db.delete(u)
+    log_activity(db, master, "users", "delete_user", f"menghapus {len(users)} user")
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
-def reset_password(user_id: uuid.UUID, data: PasswordReset, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def reset_password(user_id: uuid.UUID, data: PasswordReset, db: Session = Depends(get_db), master: User = Depends(get_master)):
     user = get_user_or_404(db, user_id)
     user.password_hash = hash_password(data.new_password)
     user.token_version += 1
     user.failed_attempts = 0
     user.locked_until = None
-    log_activity(db, admin, "users", "reset_password", f"mereset kata sandi {user.full_name}")
+    log_activity(db, master, "users", "reset_password", f"mereset password {user.username}")
     db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/{user_id}/unlock", status_code=status.HTTP_204_NO_CONTENT)
-def unlock_user(user_id: uuid.UUID, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+@router.put("/{user_id}/branches", response_model=UserOut)
+def set_mapping(user_id: uuid.UUID, data: MappingUpdate, db: Session = Depends(get_db), master: User = Depends(get_master)):
     user = get_user_or_404(db, user_id)
-    user.failed_attempts = 0
-    user.locked_until = None
-    log_activity(db, admin, "users", "unlock_user", f"membuka kunci akun {user.full_name}")
+    if user.role not in BRANCH_SCOPED_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mapping cabang hanya untuk role SM, AM, dan AMKA.")
+    ids = list(dict.fromkeys(data.branch_ids))
+    branches = list(db.scalars(select(Branch).where(Branch.id.in_(ids)))) if ids else []
+    if len(branches) != len(ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ada cabang yang tidak ditemukan.")
+    if any(b.brand_id != user.brand_id for b in branches):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cabang harus dari brand yang sama dengan user.")
+    user.branches = branches
+    log_activity(db, master, "users", "mapping", f"mengatur {len(branches)} cabang untuk {user.username}")
     db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.get("/mapping/all", response_model=list[UserOut])
+def list_mapping(brand_id: int | None = Query(None), db: Session = Depends(get_db), _: User = Depends(get_master)):
+    stmt = select(User).where(User.role.in_(BRANCH_SCOPED_ROLES)).order_by(User.username)
+    if brand_id is not None:
+        stmt = stmt.where(User.brand_id == brand_id)
+    return db.scalars(stmt).all()

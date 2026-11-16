@@ -3,218 +3,99 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Beranda - Abuya Portal</title>
+<title>Dashboard - Abuya Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/dashboard.css">
 </head>
-<body class="is-loading">
+<body class="is-loading" data-page="dashboard">
 <div class="app">
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <div class="brand-icon"><span class="material-symbols-outlined">hub</span></div>
-      <div class="brand-text">
-        <span class="brand-name">Abuya Portal</span>
-        <span class="brand-sub">Approval &amp; Inventory</span>
-      </div>
-    </div>
-
-    <nav class="nav">
-      <span class="nav-label">Utama</span>
-      <a href="dashboard.html" class="nav-item active">
-        <span class="material-symbols-outlined">space_dashboard</span><span>Beranda</span>
-      </a>
-
-      <span class="nav-label">Approval</span>
-      <a href="purchase-request.html" class="nav-item">
-        <span class="material-symbols-outlined">request_quote</span><span>Purchase Request</span>
-        <span class="nav-badge" id="navPendingBadge" hidden>0</span>
-      </a>
-      <a href="purchase-order.html" class="nav-item">
-        <span class="material-symbols-outlined">receipt_long</span><span>Purchase Order</span>
-      </a>
-
-      <span class="nav-label">Inventory</span>
-      <a href="stock.html" class="nav-item">
-        <span class="material-symbols-outlined">inventory_2</span><span>Stok Barang</span>
-      </a>
-      <a href="stock-opname.html" class="nav-item">
-        <span class="material-symbols-outlined">fact_check</span><span>Stock Opname</span>
-      </a>
-      <a href="goods-receipt.html" class="nav-item">
-        <span class="material-symbols-outlined">local_shipping</span><span>Penerimaan Barang</span>
-      </a>
-
-      <span class="nav-label admin-only" hidden>Pengaturan</span>
-      <a href="users.html" class="nav-item admin-only" hidden>
-        <span class="material-symbols-outlined">manage_accounts</span><span>Kelola User</span>
-      </a>
-      <a href="master-data.html" class="nav-item admin-only" hidden>
-        <span class="material-symbols-outlined">database</span><span>Master Data</span>
-      </a>
-    </nav>
-
-    <div class="sidebar-foot">
-      <button class="nav-item logout" id="logoutBtn" type="button">
-        <span class="material-symbols-outlined">logout</span><span>Keluar</span>
-      </button>
-    </div>
-  </aside>
-
+  <aside class="sidebar" id="sidebar"></aside>
   <div class="overlay" id="overlay"></div>
-
   <div class="main">
-    <header class="topbar">
-      <div class="topbar-left">
-        <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Menu">
-          <span class="material-symbols-outlined">menu</span>
-        </button>
-        <div class="search">
-          <span class="material-symbols-outlined">search</span>
-          <input type="search" id="searchInput" placeholder="Cari PR, PO, atau barang...">
-        </div>
-      </div>
-      <div class="topbar-right">
-        <div class="status-pill"><span class="status-dot"></span><span>Sistem Normal</span></div>
-        <button class="icon-btn" id="notifBtn" type="button" aria-label="Notifikasi">
-          <span class="material-symbols-outlined">notifications</span>
-          <span class="notif-dot" id="notifDot" hidden></span>
-        </button>
-        <div class="user-menu">
-          <button class="user-btn" id="userBtn" type="button">
-            <span class="avatar" id="userAvatar">A</span>
-            <span class="user-meta">
-              <span class="user-name" id="userName">Memuat...</span>
-              <span class="user-role" id="userRole">-</span>
-            </span>
-            <span class="material-symbols-outlined chevron">expand_more</span>
-          </button>
-          <div class="dropdown" id="userDropdown">
-            <div class="dropdown-head">
-              <span class="dropdown-email" id="userEmail">-</span>
-            </div>
-            <a href="profile.html" class="dropdown-item"><span class="material-symbols-outlined">person</span>Profil Saya</a>
-            <button class="dropdown-item danger" id="logoutBtn2" type="button"><span class="material-symbols-outlined">logout</span>Keluar</button>
-          </div>
-        </div>
-      </div>
-    </header>
-
+    <header class="topbar" id="topbar"></header>
     <main class="content">
       <section class="hero">
         <div>
           <p class="hero-date" id="todayDate">-</p>
-          <h1><span id="greeting">Selamat datang</span>, <span id="heroName">-</span></h1>
-          <p class="hero-sub">Ringkasan approval dan kondisi gudang hari ini.</p>
+          <h1><span id="greeting">Halo</span>, <span id="heroName">-</span></h1>
+          <p class="hero-sub">Ringkasan Purchase Request dan Purchase Order.</p>
         </div>
         <div class="hero-actions">
-          <a href="purchase-request.html?new=1" class="btn btn-primary">
+          <a href="purchase-request-new.html" class="btn btn-primary" id="heroCreate" hidden>
             <span class="material-symbols-outlined">add</span><span>Buat PR</span>
           </a>
-          <a href="stock-opname.html?new=1" class="btn btn-ghost">
-            <span class="material-symbols-outlined">fact_check</span><span>Mulai Opname</span>
+          <a href="purchase-request.html?status=Pending" class="btn btn-hero-ghost">
+            <span class="material-symbols-outlined">pending_actions</span><span>PR Pending</span>
           </a>
         </div>
       </section>
 
-      <section class="stats">
-        <article class="stat">
-          <div class="stat-icon blue"><span class="material-symbols-outlined">pending_actions</span></div>
-          <div class="stat-body">
-            <span class="stat-label">PR Menunggu Approval</span>
-            <span class="stat-value" id="statPending">-</span>
+      <div class="notice" id="mappingNotice" hidden>
+        <span class="material-symbols-outlined">info</span>
+        <span>Akun kamu belum punya mapping cabang, jadi belum ada PR/PO yang bisa ditampilkan. Hubungi Master ya.</span>
+      </div>
+
+      <section class="dash-filter">
+        <h2 class="section-title">Ringkasan PR</h2>
+        <div class="filters">
+          <select class="select" id="fBranch" aria-label="Filter cabang"></select>
+          <div class="date-range" title="Filter tanggal dibuat">
+            <input type="date" class="input" id="fFrom" placeholder="Dari tanggal" aria-label="Dari tanggal">
+            <span>s/d</span>
+            <input type="date" class="input" id="fTo" placeholder="Sampai tanggal" aria-label="Sampai tanggal">
           </div>
-        </article>
-        <article class="stat">
-          <div class="stat-icon green"><span class="material-symbols-outlined">receipt_long</span></div>
-          <div class="stat-body">
-            <span class="stat-label">PO Bulan Ini</span>
-            <span class="stat-value" id="statPo">-</span>
-          </div>
-        </article>
-        <article class="stat">
-          <div class="stat-icon amber"><span class="material-symbols-outlined">warning</span></div>
-          <div class="stat-body">
-            <span class="stat-label">Stok Menipis</span>
-            <span class="stat-value" id="statLow">-</span>
-          </div>
-        </article>
-        <article class="stat">
-          <div class="stat-icon slate"><span class="material-symbols-outlined">fact_check</span></div>
-          <div class="stat-body">
-            <span class="stat-label">Opname Berjalan</span>
-            <span class="stat-value" id="statOpname">-</span>
-          </div>
-        </article>
+          <button class="chip-reset" id="fReset" type="button" hidden>
+            <span class="material-symbols-outlined">filter_alt_off</span><span>Reset</span>
+          </button>
+        </div>
       </section>
+
+      <section class="stats" id="statCards"></section>
 
       <section class="grid">
         <div class="col-main">
-          <h2 class="section-title">Modul</h2>
-          <div class="modules">
-            <a href="purchase-request.html" class="module">
-              <div class="module-icon blue"><span class="material-symbols-outlined">approval</span></div>
-              <div class="module-body">
-                <h3>Approval PR/PO</h3>
-                <p>Ajukan, review, dan setujui purchase request &amp; purchase order per cabang.</p>
-              </div>
-              <span class="material-symbols-outlined module-arrow">arrow_forward</span>
-            </a>
-            <a href="stock.html" class="module">
-              <div class="module-icon green"><span class="material-symbols-outlined">warehouse</span></div>
-              <div class="module-body">
-                <h3>Inventory Gudang</h3>
-                <p>Pantau stok, penerimaan barang, dan stock opname gudang.</p>
-              </div>
-              <span class="material-symbols-outlined module-arrow">arrow_forward</span>
-            </a>
-          </div>
-
           <div class="panel">
             <div class="panel-head">
-              <h2 class="section-title">Aktivitas Terbaru</h2>
-              <a href="activity.html" class="link">Lihat semua</a>
+              <h2 class="section-title">PR yang expired besok</h2>
+              <span class="panel-meta" id="expiringMeta"></span>
             </div>
-            <ul class="activity" id="activityList">
-              <li class="skeleton"></li>
-              <li class="skeleton"></li>
-              <li class="skeleton"></li>
-            </ul>
+            <ul class="list-plain expiring" id="expiringList"></ul>
+          </div>
+          <div class="top-grid">
+            <div class="panel">
+              <h2 class="section-title">Top item berdasarkan jumlah PO</h2>
+              <ol class="list-plain top-list" id="topPo"></ol>
+            </div>
+            <div class="panel">
+              <h2 class="section-title">Top item berdasarkan total qty</h2>
+              <ol class="list-plain top-list" id="topQty"></ol>
+            </div>
           </div>
         </div>
-
         <div class="col-side">
           <div class="panel">
-            <h2 class="section-title">Aksi Cepat</h2>
-            <div class="quick">
-              <a href="purchase-request.html?new=1" class="quick-item"><span class="material-symbols-outlined">note_add</span><span>Buat PR</span></a>
-              <a href="purchase-request.html?status=pending" class="quick-item"><span class="material-symbols-outlined">task_alt</span><span>Approve PR</span></a>
-              <a href="goods-receipt.html?new=1" class="quick-item"><span class="material-symbols-outlined">local_shipping</span><span>Terima Barang</span></a>
-              <a href="stock-opname.html?new=1" class="quick-item"><span class="material-symbols-outlined">fact_check</span><span>Stock Opname</span></a>
-            </div>
+            <h2 class="section-title">Aktivitas terbaru</h2>
+            <ul class="list-plain activity" id="activityList"></ul>
           </div>
-
           <div class="panel">
-            <h2 class="section-title">Cabang Saya</h2>
-            <ul class="branches" id="branchList">
-              <li class="skeleton small"></li>
-              <li class="skeleton small"></li>
-            </ul>
+            <div class="panel-head">
+              <h2 class="section-title" id="branchPanelTitle">Cabang saya</h2>
+              <span class="panel-meta" id="branchCount"></span>
+            </div>
+            <ul class="list-plain branches" id="branchList"></ul>
           </div>
         </div>
       </section>
     </main>
-
-    <footer class="footer">
-      <span>© <span id="year"></span> PT. Abuya Berkah Sejahtera</span>
-      <span>Kebuli Abuya • Almaz Fried Chicken</span>
-    </footer>
+    <footer class="footer" id="footer"></footer>
   </div>
 </div>
 
 <div class="toast" id="toast" role="status"></div>
-
+<script src="js/app.js"></script>
 <script src="js/dashboard.js"></script>
 </body>
 </html>

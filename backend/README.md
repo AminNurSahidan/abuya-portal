@@ -37,37 +37,58 @@ abuya-portal/
    ```bash
    python -c "import secrets; print(secrets.token_urlsafe(48))"
    ```
-4. Buat tabel + akun admin pertama:
+4. Buat tabel + akun Master pertama:
    ```bash
-   python -m app.cli create-admin --email admin@abuyagroup.com --name "Admin Operasional"
+   python -m app.cli create-master --username master
    ```
-5. Jalankan server:
+5. (Opsional) Isi data contoh: 8 cabang, produk, PIC, 5 user demo (password `password123`), dan PR/PO:
    ```bash
-   uvicorn app.main:app --reload
+   python -m app.cli seed-demo
    ```
-6. Buka http://localhost:8000 lalu login. Dokumentasi API: http://localhost:8000/api/docs
+6. Jalankan server:
+   ```bash
+   python -m uvicorn app.main:app --reload
+   ```
+7. Buka http://localhost:8000 lalu login. Dokumentasi API: http://localhost:8000/api/docs
 
-## Endpoint
+Perintah lain:
+- `python -m app.cli reset-db` menghapus SEMUA tabel dan data, lalu membuat ulang (dipakai kalau struktur tabel berubah).
+- `python -m app.cli init-db` membuat tabel yang belum ada tanpa menghapus data.
 
-| Method | Path | Akses | Fungsi |
-|---|---|---|---|
-| POST | /api/auth/login | publik | Login, dapat token |
-| GET | /api/auth/me | login | Data user yang sedang login |
-| PATCH | /api/auth/me | login | Ubah nama sendiri |
-| POST | /api/auth/change-password | login | Ganti kata sandi sendiri |
-| POST | /api/auth/logout | login | Catat logout |
-| POST | /api/auth/logout-all | login | Keluar dari semua perangkat |
-| GET | /api/users | admin | Daftar user (filter q, role, active, page, size) |
-| POST | /api/users | admin | Tambah user |
-| GET | /api/users/{id} | admin | Detail user |
-| PATCH | /api/users/{id} | admin | Ubah nama, role, status aktif, cabang |
-| POST | /api/users/{id}/reset-password | admin | Reset kata sandi user |
-| POST | /api/users/{id}/unlock | admin | Buka kunci akun |
-| GET/POST/PATCH | /api/brands | admin (GET: login) | Master brand |
-| GET/POST/PATCH | /api/branches | admin (GET: login) | Master cabang |
-| GET | /api/dashboard/summary | login | Data beranda |
+## Role (sama dengan MASAR)
 
-Role: `admin`, `am`, `amka`, `approver`, `gudang`, `staff`.
+| Role | Akses |
+|---|---|
+| SM | Buat PR untuk cabang yang di-mapping |
+| AM | Edit item, Approve/Tolak PR Pending di cabang yang di-mapping |
+| AMKA | Buat PR (bisa langsung Approve), edit & Approve PR di cabang yang di-mapping |
+| PIC | Lihat PR/PO brand-nya |
+| Master | Semua brand, semua cabang, Master Data |
+
+Aturan: PR Pending otomatis Expired di hari Required Date. Approve PR otomatis menerbitkan PO. Kebuli Abuya hanya bisa shipping Direct. Nomor dokumen `PR-YYYYMMDD-001` / `PO-YYYYMMDD-001`, reset tiap hari.
+
+## Endpoint utama
+
+| Method | Path | Fungsi |
+|---|---|---|
+| POST | /api/auth/login | Login pakai username |
+| GET | /api/auth/me | User yang sedang login |
+| GET | /api/dashboard/summary | Data dashboard |
+| GET | /api/purchase-requests | Daftar PR (status, branch_id, shipping, q, date_from, date_to, sort, dir) |
+| GET | /api/purchase-requests/summary | Jumlah PR per status & per cabang |
+| GET | /api/purchase-requests/form-options | Cabang, produk, PIC untuk form PR |
+| POST | /api/purchase-requests | Buat PR (`approve_now` untuk AMKA/Master) |
+| GET | /api/purchase-requests/{id} | Detail PR |
+| POST/PATCH/DELETE | /api/purchase-requests/{id}/items | Tambah/ubah/hapus item PR Pending |
+| POST | /api/purchase-requests/{id}/approve | Approve + terbitkan PO |
+| POST | /api/purchase-requests/{id}/reject | Tolak PR |
+| GET | /api/purchase-orders | Daftar PO |
+| GET | /api/purchase-orders/summary | Jumlah PO per shipping & per cabang |
+| GET | /api/purchase-orders/export | Data export Excel |
+| GET | /api/purchase-orders/{id} | Detail PO |
+| GET/POST/PATCH | /api/branches, /api/products, /api/pics | Master data (tulis: Master saja) |
+| GET/POST/PATCH | /api/users | Kelola user (Master) |
+| PUT | /api/users/{id}/branches | Mapping cabang user (Master) |
 
 ## Deploy ke VPS Hostinger (Ubuntu)
 
@@ -82,7 +103,7 @@ Role: `admin`, `am`, `amka`, `approver`, `gudang`, `staff`.
    sudo mkdir -p /var/www/abuya-portal
    ```
 3. Buat database (langkah lokal no. 1) lewat `sudo -u postgres psql`.
-4. Di `/var/www/abuya-portal/backend`: buat venv, install requirements, isi `.env` (kosongkan `FRONTEND_DIR`, karena frontend dilayani Nginx), lalu jalankan `create-admin`.
+4. Di `/var/www/abuya-portal/backend`: buat venv, install requirements, isi `.env` (kosongkan `FRONTEND_DIR`, karena frontend dilayani Nginx), lalu jalankan `create-master`.
 5. Pasang service:
    ```bash
    sudo chown -R abuya:abuya /var/www/abuya-portal

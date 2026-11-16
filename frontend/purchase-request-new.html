@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Buat Purchase Request - Abuya Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/purchase-request-new.css">
+</head>
+<body class="is-loading" data-page="purchase-request">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="overlay" id="overlay"></div>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <a class="back-link" href="purchase-request.html"><span class="material-symbols-outlined">arrow_back</span><span>Kembali ke daftar PR</span></a>
+
+      <section class="page-head">
+        <div class="crumbs">
+          <span>Approval</span>
+          <span class="material-symbols-outlined">chevron_right</span>
+          <span>Purchase Request</span>
+          <span class="material-symbols-outlined">chevron_right</span>
+          <span class="crumb-active">Buat Baru</span>
+        </div>
+        <h1>Buat Purchase Request</h1>
+        <p id="pageSub">Isi data PR, tambahkan item barang, lalu kirim.</p>
+        <p class="page-hint">PR otomatis jadi Expired kalau belum di-approve sampai Required Date.</p>
+      </section>
+
+      <div class="notice" id="blockNotice" hidden>
+        <span class="material-symbols-outlined">block</span>
+        <span id="blockText"></span>
+      </div>
+
+      <form class="card form-card" id="prForm" novalidate hidden>
+        <div class="form-grid">
+          <div class="field field-wide">
+            <label for="branch">Cabang</label>
+            <select class="select" id="branch" required></select>
+          </div>
+          <div class="field">
+            <label for="requiredDate">Required Date</label>
+            <input type="date" class="input" id="requiredDate" required title="PR otomatis Expired kalau belum di-approve sampai tanggal ini">
+          </div>
+          <div class="field field-fit">
+            <label for="shipping">Shipping</label>
+            <select class="select" id="shipping" required></select>
+          </div>
+          <div class="field" id="picField" hidden>
+            <label for="pic">PIC Final</label>
+            <select class="select" id="pic" required></select>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-head">
+            <h2 class="section-title">Item barang</h2>
+            <span class="panel-meta" id="itemCount">0 item</span>
+          </div>
+          <div class="item-adder">
+            <input class="input" id="productInput" list="productList" placeholder="Ketik untuk cari barang..." autocomplete="off">
+            <datalist id="productList"></datalist>
+            <input type="number" class="input qty" id="qtyInput" min="1" placeholder="Jumlah">
+            <button class="btn btn-primary" type="button" id="addItemBtn">
+              <span class="material-symbols-outlined">add</span><span>Tambah</span>
+            </button>
+          </div>
+          <div class="item-list" id="itemList"></div>
+        </div>
+
+        <div class="field">
+          <label for="notes">Notes</label>
+          <textarea class="textarea" id="notes" maxlength="2000" placeholder="Catatan tambahan (opsional)"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <a href="purchase-request.html" class="btn btn-ghost">Batal</a>
+          <button class="btn btn-primary" type="submit" id="submitBtn">
+            <span class="material-symbols-outlined">send</span><span id="submitText">Kirim PR</span>
+          </button>
+          <button class="btn btn-primary" type="button" id="approveBtn" hidden>
+            <span class="material-symbols-outlined">task_alt</span><span>Simpan &amp; Approve</span>
+          </button>
+        </div>
+      </form>
+    </main>
+    <footer class="footer" id="footer"></footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="js/app.js"></script>
+<script src="js/purchase-request-new.js"></script>
+</body>
+</html>

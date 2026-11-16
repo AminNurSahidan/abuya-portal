@@ -1,0 +1,7 @@
+.req-date { white-space: nowrap; }
+
+.req-date.soon { color: #c2410c; font-weight: 600; }
+
+.req-date small { display: block; font-size: 11px; font-weight: 600; }
+
+.data-table tbody tr.row-link:hover .doc-no { text-decoration: underline; }

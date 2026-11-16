@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
+from app.scope import require_master
 from app.security import decode_access_token
 
 bearer = HTTPBearer(auto_error=False)
@@ -35,13 +36,6 @@ def get_current_user(
     return user
 
 
-def require_roles(*roles: str):
-    def checker(user: User = Depends(get_current_user)) -> User:
-        if user.role not in roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Kamu tidak punya akses ke fitur ini.")
-        return user
-
-    return checker
-
-
-require_admin = require_roles("admin")
+def get_master(user: User = Depends(get_current_user)) -> User:
+    require_master(user)
+    return user
