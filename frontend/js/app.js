@@ -30,7 +30,9 @@ const NAV_ITEMS = [
   { key: "dashboard", href: "dashboard.html", icon: "space_dashboard", label: "Dashboard" },
   { section: "Approval" },
   { key: "purchase-request", href: "purchase-request.html", icon: "request_quote", label: "Purchase Request", badge: true },
-  { key: "purchase-order", href: "purchase-order.html", icon: "receipt_long", label: "Purchase Order" }
+  { key: "purchase-order", href: "purchase-order.html", icon: "receipt_long", label: "Purchase Order" },
+  { section: "Master", master: true },
+  { key: "administrator", href: "administrator.html", icon: "admin_panel_settings", label: "Administrator", master: true }
 ];
 
 const App = { user: null, brands: [] };
@@ -96,10 +98,13 @@ function renderShell() {
   const nav = el("nav", "nav");
   NAV_ITEMS.forEach((item) => {
     if (item.section) {
-      nav.appendChild(el("span", "nav-label", item.section));
+      const lbl = el("span", "nav-label" + (item.master ? " master-only" : ""), item.section);
+      if (item.master) lbl.hidden = true;
+      nav.appendChild(lbl);
       return;
     }
-    const a = el("a", "nav-item" + (item.key === active ? " active" : ""));
+    const a = el("a", "nav-item" + (item.key === active ? " active" : "") + (item.master ? " master-only" : ""));
+    if (item.master) a.hidden = true;
     a.href = item.href;
     a.append(icon_(item.icon), el("span", "", item.label));
     if (item.badge) {
@@ -228,6 +233,7 @@ function renderUserShell() {
   $("userInfo").textContent = (ROLE_LABELS[u.role] || u.role) + (u.brand ? " • " + u.brand.name : " • Semua brand");
 
   const chip = $("brandChip");
+  document.querySelectorAll(".master-only").forEach((n) => { n.hidden = u.role !== "Master"; });
   if (u.role === "Master") {
     const select = $("brandSelect");
     select.innerHTML = "";
@@ -606,8 +612,12 @@ function timeAgo(iso) {
   return formatDateTime(iso);
 }
 
-const PO_EXPORT_HEADERS = ["Purchase Date", "Required Date", "PO Number", "PR Number", "Branch", "Product Name", "Unit", "Purchase Qty", "Shipping", "PIC", "Notes", "PO Created By"];
-const PO_EXPORT_WIDTHS = [14, 14, 18, 18, 24, 28, 9, 13, 10, 18, 24, 15];
+const PO_EXPORT_HEADERS = ["Purchase Date", "Required Date", "Purchase Number", "PR Number", "Branch", "Product Name", "Unit", "Purchase Qty", "PIC", "Notes", "PO Created By"];
+const PO_EXPORT_MIN_WIDTHS = [13.89, 13.56, 16.78, 11, 7.33, 13.56, 4.55, 12.89, 4.78, 6.11, 14.11];
+
+function canExportPO(user) {
+  return !!user && user.role === "PIC";
+}
 
 async function downloadPOExcel(rows, filename) {
   if (typeof ExcelJS === "undefined") {
@@ -615,32 +625,41 @@ async function downloadPOExcel(rows, filename) {
     return;
   }
   const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet("Purchase Order");
-  ws.columns = PO_EXPORT_HEADERS.map((header, i) => ({ header, width: PO_EXPORT_WIDTHS[i] }));
-  ws.getRow(1).eachCell((cell) => {
-    cell.font = { name: "Arial", size: 10, italic: true, color: { argb: "FFFFFFFF" } };
+  const ws = workbook.addWorksheet("Sheet1");
+  const data = rows.map((r) => [
+    formatDMY(r.purchase_date),
+    formatDMY(r.required_date, true),
+    r.po_number,
+    r.pr_number,
+    r.branch,
+    r.product_name,
+    r.unit,
+    r.qty === null ? "" : r.qty,
+    r.pic,
+    r.notes,
+    r.created_by
+  ]);
+  ws.columns = PO_EXPORT_HEADERS.map((header, i) => {
+    const longest = data.reduce((m, row) => Math.max(m, String(row[i] === null || row[i] === undefined ? "" : row[i]).length), header.length);
+    return { header, width: Math.min(Math.max(PO_EXPORT_MIN_WIDTHS[i], longest + 2), 50) };
+  });
+  const head = ws.getRow(1);
+  head.height = 14.25;
+  head.eachCell((cell) => {
+    cell.font = { name: "Arial", size: 10, color: { argb: "FFFFFFFF" } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF163E64" } };
-    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.alignment = { horizontal: "center", vertical: "bottom" };
     cell.border = { top: { style: "dashed" }, bottom: { style: "dashed" }, left: { style: "dashed" }, right: { style: "dashed" } };
   });
-  rows.forEach((r) => {
-    ws.addRow([
-      formatDMY(r.purchase_date),
-      formatDMY(r.required_date, true),
-      r.po_number,
-      r.pr_number,
-      r.branch,
-      r.product_name,
-      r.unit,
-      r.qty === null ? "" : r.qty,
-      r.shipping,
-      r.pic,
-      r.notes,
-      r.created_by
-    ]);
+  data.forEach((row) => {
+    const r = ws.addRow(row);
+    r.eachCell({ includeEmpty: true }, (cell) => { cell.font = { name: "Arial", size: 10 }; });
   });
   const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  saveBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), filename);
+}
+
+function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

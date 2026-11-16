@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Administrator - Abuya Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/administrator.css">
+</head>
+<body class="is-loading" data-page="administrator">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="overlay" id="overlay"></div>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <section class="page-head">
+        <div class="crumbs">
+          <span>Master</span>
+          <span class="material-symbols-outlined">chevron_right</span>
+          <span class="crumb-active">Administrator</span>
+        </div>
+        <h1>Administrator</h1>
+        <p>Kelola user, cabang, produk, PIC, dan mapping cabang.</p>
+      </section>
+
+      <div class="notice" id="denyNotice" hidden>
+        <span class="material-symbols-outlined">lock</span>
+        <span>Halaman ini cuma bisa diakses oleh role Master.</span>
+      </div>
+
+      <div class="admin-area" id="adminArea" hidden>
+        <div class="tabs" id="adminTabs" role="tablist"></div>
+
+        <section class="panel table-panel" id="listPanel">
+          <div class="toolbar">
+            <div class="search-box">
+              <span class="material-symbols-outlined">search</span>
+              <input type="search" id="fSearch" placeholder="Cari...">
+            </div>
+            <div class="filters">
+              <select class="select" id="fRole" aria-label="Filter role">
+                <option value="">Semua role</option>
+                <option value="SM">SM</option>
+                <option value="AM">AM</option>
+                <option value="AMKA">AMKA</option>
+                <option value="PIC">PIC</option>
+                <option value="Master">Master</option>
+              </select>
+              <select class="select" id="fShip" aria-label="Filter shipping">
+                <option value="">Semua shipping</option>
+                <option value="Direct">Direct</option>
+                <option value="Indirect">Indirect</option>
+              </select>
+              <button class="btn btn-ghost" type="button" id="templateBtn" title="Download template Excel">
+                <span class="material-symbols-outlined">description</span><span>Template</span>
+              </button>
+              <button class="btn btn-ghost" type="button" id="uploadBtn">
+                <span class="material-symbols-outlined">upload_file</span><span>Upload Excel</span>
+              </button>
+              <button class="btn btn-primary" type="button" id="addBtn">
+                <span class="material-symbols-outlined">add</span><span id="addText">Tambah</span>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr id="theadRow"></tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <span id="pagerInfo">-</span>
+            <div class="pager-btns">
+              <button class="pager-btn" id="prevBtn" type="button" disabled>
+                <span class="material-symbols-outlined">chevron_left</span><span>Sebelumnya</span>
+              </button>
+              <span class="page-num" id="pageNum">-</span>
+              <button class="pager-btn" id="nextBtn" type="button" disabled>
+                <span>Selanjutnya</span><span class="material-symbols-outlined">chevron_right</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="map-grid" id="mappingPanel" hidden>
+          <div class="panel map-users">
+            <div class="panel-head">
+              <h2 class="section-title">User cabang</h2>
+              <span class="panel-meta" id="mapUserMeta"></span>
+            </div>
+            <div class="search-box">
+              <span class="material-symbols-outlined">search</span>
+              <input type="search" id="mapUserSearch" placeholder="Cari username...">
+            </div>
+            <ul class="list-plain map-user-list" id="mapUserList"></ul>
+          </div>
+          <div class="panel map-branches">
+            <div class="panel-head">
+              <h2 class="section-title" id="mapTitle">Pilih user dulu</h2>
+              <span class="panel-meta" id="mapMeta"></span>
+            </div>
+            <div class="map-toolbar" id="mapToolbar" hidden>
+              <div class="search-box">
+                <span class="material-symbols-outlined">search</span>
+                <input type="search" id="mapBranchSearch" placeholder="Cari cabang...">
+              </div>
+              <div class="map-tools">
+                <button class="btn btn-ghost btn-sm" type="button" id="mapAll">Pilih semua</button>
+                <button class="btn btn-ghost btn-sm" type="button" id="mapNone">Kosongkan</button>
+              </div>
+            </div>
+            <div class="map-branch-list" id="mapBranchList"></div>
+            <div class="form-actions" id="mapActions" hidden>
+              <button class="btn btn-ghost" type="button" id="mapReset">Batal</button>
+              <button class="btn btn-primary" type="button" id="mapSave">
+                <span class="material-symbols-outlined">save</span><span>Simpan mapping</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="modal" hidden>
+        <form class="modal-card" id="modalForm" novalidate role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+          <div class="modal-head">
+            <h2 id="modalTitle">-</h2>
+            <button class="btn-icon" type="button" id="modalClose" aria-label="Tutup"><span class="material-symbols-outlined">close</span></button>
+          </div>
+          <div class="modal-body">
+            <div class="modal-fields" data-entity="users" hidden>
+              <div class="field" id="uUsernameField">
+                <label for="uUsername">Username</label>
+                <input class="input" id="uUsername" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="contoh: sm.bekasi">
+                <span class="hint">Huruf kecil, angka, titik, strip, atau underscore. Login cukup pakai username ini.</span>
+              </div>
+              <div class="field" id="uPasswordField">
+                <label for="uPassword">Password</label>
+                <input class="input" id="uPassword" type="password" autocomplete="new-password" placeholder="Minimal 6 karakter">
+              </div>
+              <div class="field">
+                <label for="uRole">Role</label>
+                <select class="select" id="uRole" required>
+                  <option value="SM">SM (Store Manager)</option>
+                  <option value="AM">AM (Area Manager)</option>
+                  <option value="AMKA">AMKA (AM Kebuli Abuya)</option>
+                  <option value="PIC">PIC</option>
+                  <option value="Master">Master</option>
+                </select>
+              </div>
+              <div class="field" id="uBrandField">
+                <label for="uBrand">Brand</label>
+                <select class="select" id="uBrand" required></select>
+              </div>
+              <label class="check-row" id="uActiveField"><input type="checkbox" id="uActive"><span>Akun aktif</span></label>
+            </div>
+            <div class="modal-fields" data-entity="branches" hidden>
+              <div class="field">
+                <label for="bCode">Kode cabang</label>
+                <input class="input" id="bCode" autocomplete="off" placeholder="contoh: AFC06">
+              </div>
+              <div class="field">
+                <label for="bName">Nama cabang</label>
+                <input class="input" id="bName" autocomplete="off" placeholder="contoh: Almaz Cibubur">
+              </div>
+              <div class="field">
+                <label for="bBrand">Brand</label>
+                <select class="select" id="bBrand" required></select>
+              </div>
+            </div>
+            <div class="modal-fields" data-entity="products" hidden>
+              <div class="field">
+                <label for="pName">Nama produk</label>
+                <input class="input" id="pName" autocomplete="off" placeholder="contoh: Tepung Bumbu Crispy">
+              </div>
+              <div class="field">
+                <label for="pUnit">Unit</label>
+                <input class="input" id="pUnit" autocomplete="off" placeholder="contoh: Kg, Pack, Dus">
+              </div>
+              <div class="field">
+                <label for="pBrand">Brand</label>
+                <select class="select" id="pBrand"></select>
+                <span class="hint">Pilih "Semua brand" kalau produk ini dipakai di semua brand.</span>
+              </div>
+            </div>
+            <div class="modal-fields" data-entity="pics" hidden>
+              <div class="field">
+                <label for="cName">Nama PIC</label>
+                <input class="input" id="cName" autocomplete="off" placeholder="contoh: DC Cikarang">
+              </div>
+              <div class="field">
+                <label for="cShip">Shipping</label>
+                <select class="select" id="cShip" required>
+                  <option value="Direct">Direct (Distribution Center)</option>
+                  <option value="Indirect">Indirect (Vendor)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="cBrand">Brand</label>
+                <select class="select" id="cBrand"></select>
+              </div>
+            </div>
+            <div class="modal-fields" data-entity="upload" hidden>
+              <input type="file" id="upFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+              <button class="upload-drop" type="button" id="upDrop">
+                <span class="material-symbols-outlined">upload_file</span>
+                <strong id="upDropTitle">Pilih file .xlsx</strong>
+                <span id="upDropHint">Klik atau tarik file ke sini</span>
+              </button>
+              <div class="upload-detail" id="upDetail" hidden>
+                <div class="upload-row">
+                  <div class="field" id="upSheetField">
+                    <label for="upSheet">Sheet</label>
+                    <select class="select" id="upSheet"></select>
+                  </div>
+                  <div class="field" id="upBrandField">
+                    <label for="upBrand">Brand</label>
+                    <select class="select" id="upBrand"></select>
+                  </div>
+                </div>
+                <span class="hint" id="upBrandHint"></span>
+                <div class="upload-summary" id="upSummary"></div>
+                <div class="upload-preview">
+                  <table class="data-table mini">
+                    <thead><tr id="upHead"></tr></thead>
+                    <tbody id="upBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div class="modal-fields" data-entity="password" hidden>
+              <div class="field">
+                <label for="rPassword">Password baru</label>
+                <input class="input" id="rPassword" type="password" autocomplete="new-password" placeholder="Minimal 6 karakter">
+              </div>
+              <div class="field">
+                <label for="rPassword2">Ulangi password baru</label>
+                <input class="input" id="rPassword2" type="password" autocomplete="new-password">
+              </div>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-ghost" type="button" id="modalCancel">Batal</button>
+            <button class="btn btn-primary" type="submit" id="modalSubmit">Simpan</button>
+          </div>
+        </form>
+      </div>
+    </main>
+    <footer class="footer" id="footer"></footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="js/app.js"></script>
+<script src="js/administrator.js"></script>
+</body>
+</html>

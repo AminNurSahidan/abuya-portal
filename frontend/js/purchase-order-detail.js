@@ -6,6 +6,7 @@ bootApp(async () => {
     notFound("ID PO tidak valid.");
     return;
   }
+  $("exportBtn").hidden = !canExportPO(App.user);
   $("exportBtn").addEventListener("click", exportExcel);
   try {
     po = await api("/purchase-orders/" + poId);

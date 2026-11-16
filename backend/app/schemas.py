@@ -307,3 +307,44 @@ class PRFormOptions(BaseModel):
     pics: list[PicOut]
     can_create: bool
     can_approve_now: bool
+
+
+class ProductBulkItem(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    unit: str | None = Field(default=None, max_length=30)
+    brand_id: int | None = None
+
+
+class BranchBulkItem(BaseModel):
+    code: str = Field(min_length=1, max_length=30)
+    name: str = Field(min_length=2, max_length=150)
+    brand_id: int
+
+
+class PicBulkItem(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+    shipping: Shipping
+    brand_id: int | None = None
+
+
+class ProductBulk(BaseModel):
+    items: list[ProductBulkItem] = Field(min_length=1, max_length=5000)
+
+
+class BranchBulk(BaseModel):
+    items: list[BranchBulkItem] = Field(min_length=1, max_length=5000)
+
+
+class PicBulk(BaseModel):
+    items: list[PicBulkItem] = Field(min_length=1, max_length=5000)
+
+
+class BulkSkip(BaseModel):
+    row: int
+    label: str
+    reason: str
+
+
+class BulkResult(BaseModel):
+    added: int
+    skipped: list[BulkSkip]

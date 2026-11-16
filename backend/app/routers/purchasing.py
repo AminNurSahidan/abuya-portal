@@ -487,6 +487,8 @@ def export_pos(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if user.role != "PIC":
+        raise forbidden("Export Purchase Order hanya bisa dilakukan oleh role PIC.")
     stmt = filtered_pos(user, shipping, branch_id, q, date_from, date_to, brand_id)
     if po_id is not None:
         stmt = stmt.where(PurchaseOrder.id == po_id)

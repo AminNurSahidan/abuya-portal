@@ -56,7 +56,7 @@ class Branch(Base):
 
 class Product(Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("name", "unit", name="uq_products_name_unit"),)
+    __table_args__ = (UniqueConstraint("name", "unit", "brand_id", name="uq_products_name_unit_brand"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(200))

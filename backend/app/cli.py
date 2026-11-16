@@ -5,7 +5,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select, text
 
 from app import models
 from app.database import Base, SessionLocal, engine
@@ -14,7 +14,7 @@ from app.schemas import USERNAME_PATTERN, normalize_username
 from app.scope import WIB, today_wib
 from app.security import hash_password
 
-DEFAULT_BRANDS = [("KBA", "Kebuli Abuya", True), ("AFC", "Almaz Fried Chicken", False)]
+DEFAULT_BRANDS = [("KBA", "Kebuli Abuya", True), ("AFC", "Almaz Fried Chicken", False), ("DC", "Distribution Center", False)]
 
 DEMO_BRANCHES = {
     "AFC": ["Almaz Bekasi Juanda", "Almaz Depok Margonda", "Almaz Bogor Pajajaran", "Almaz Tangerang BSD", "Almaz Jakarta Kemang"],
@@ -40,6 +40,7 @@ DEMO_USERS = [
     ("am.afc", "AM", "AFC", ["Almaz Bekasi Juanda", "Almaz Depok Margonda", "Almaz Bogor Pajajaran"]),
     ("amka.kba", "AMKA", "KBA", ["Kebuli Jakarta Tebet", "Kebuli Bekasi Summarecon", "Kebuli Depok Sawangan"]),
     ("pic.afc", "PIC", "AFC", []),
+    ("pic.kba", "PIC", "KBA", []),
 ]
 
 DEMO_PASSWORD = "password123"
@@ -57,8 +58,44 @@ def ensure_default_brands(db) -> dict[str, models.Brand]:
     return out
 
 
+UNIQUE_RULES = [
+    ("products", "uq_products_name_unit_brand", ["name", "unit", "brand_id"]),
+    ("pics", "uq_pics_name_shipping_brand", ["name", "shipping", "brand_id"]),
+]
+
+
+def sync_unique_constraints() -> list[str]:
+    if engine.dialect.name != "postgresql":
+        return []
+    changes = []
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        for table, keep, cols in UNIQUE_RULES:
+            if not insp.has_table(table):
+                continue
+            has_keep = False
+            for uc in insp.get_unique_constraints(table):
+                if uc["name"] == keep and list(uc["column_names"]) == cols:
+                    has_keep = True
+                    continue
+                conn.execute(text(f'ALTER TABLE "{table}" DROP CONSTRAINT "{uc["name"]}"'))
+                changes.append(f"{table}: hapus constraint lama {uc['name']} ({', '.join(uc['column_names'])})")
+            constraint_names = {uc["name"] for uc in insp.get_unique_constraints(table)}
+            for ix in insp.get_indexes(table):
+                if ix.get("unique") and ix["name"] not in constraint_names and ix["name"] != keep:
+                    conn.execute(text(f'DROP INDEX IF EXISTS "{ix["name"]}"'))
+                    changes.append(f"{table}: hapus index unik lama {ix['name']} ({', '.join(c for c in ix['column_names'] if c)})")
+            if not has_keep:
+                col_sql = ", ".join(f'"{c}"' for c in cols)
+                conn.execute(text(f'ALTER TABLE "{table}" ADD CONSTRAINT "{keep}" UNIQUE ({col_sql})'))
+                changes.append(f"{table}: tambah constraint {keep} ({', '.join(cols)})")
+    return changes
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    for line in sync_unique_constraints():
+        print(line)
     with SessionLocal() as db:
         ensure_default_brands(db)
         db.commit()

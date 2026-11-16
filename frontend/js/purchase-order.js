@@ -12,6 +12,7 @@ let lastTotal = 0;
 bootApp(async (user) => {
   if (!SHIPPINGS.some((s) => s.key === state.shipping)) state.shipping = "";
   $("mappingNotice").hidden = !hasNoMapping(user);
+  $("exportBtn").hidden = !canExportPO(user);
   $("fSearch").value = state.q;
   $("fFrom").value = state.from;
   $("fTo").value = state.to;

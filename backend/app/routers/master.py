@@ -8,14 +8,19 @@ from app.database import get_db
 from app.deps import get_current_user, get_master
 from app.models import Branch, Brand, Pic, Product, PurchaseRequest, User
 from app.schemas import (
+    BranchBulk,
     BranchIn,
     BranchOut,
     BranchUpdate,
     BrandOut,
     BulkDelete,
+    BulkResult,
+    BulkSkip,
+    PicBulk,
     PicIn,
     PicOut,
     PicUpdate,
+    ProductBulk,
     ProductIn,
     ProductOut,
     ProductUpdate,
@@ -105,17 +110,12 @@ def create_product(data: ProductIn, db: Session = Depends(get_db), master: User 
     ensure_brand(db, data.brand_id)
     unit = (data.unit or "").strip() or None
     name = data.name.strip()
-    dup = db.scalar(
-        select(func.count()).select_from(Product).where(
-            func.lower(Product.name) == name.lower(), func.lower(func.coalesce(Product.unit, "")) == (unit or "").lower()
-        )
-    )
-    if dup:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Produk dengan nama dan unit itu sudah ada.")
+    if product_key(name, unit, data.brand_id) in existing_product_keys(db):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Produk dengan nama, unit, dan brand itu sudah ada.")
     product = Product(name=name, unit=unit, brand_id=data.brand_id)
     db.add(product)
     log_activity(db, master, "master", "create_product", f"menambahkan produk {product.display_name}")
-    commit_or_conflict(db, "Produk dengan nama dan unit itu sudah ada.")
+    commit_or_conflict(db, "Produk dengan nama, unit, dan brand itu sudah ada.")
     db.refresh(product)
     return product
 
@@ -133,7 +133,7 @@ def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(g
         ensure_brand(db, data.brand_id)
         product.brand_id = data.brand_id
     log_activity(db, master, "master", "update_product", f"memperbarui produk {product.display_name}")
-    commit_or_conflict(db, "Produk dengan nama dan unit itu sudah ada.")
+    commit_or_conflict(db, "Produk dengan nama, unit, dan brand itu sudah ada.")
     db.refresh(product)
     return product
 
@@ -194,3 +194,90 @@ def delete_pics(data: BulkDelete, db: Session = Depends(get_db), master: User = 
     log_activity(db, master, "master", "delete_pic", f"menghapus {len(data.ids)} PIC")
     commit_or_conflict(db, "PIC tidak bisa dihapus.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def product_key(name: str, unit: str | None, brand_id: int | None) -> tuple:
+    return (name.strip().lower(), (unit or "").strip().lower(), brand_id)
+
+
+def existing_product_keys(db: Session) -> set:
+    return {product_key(n, u, b) for n, u, b in db.execute(select(Product.name, Product.unit, Product.brand_id)).all()}
+
+
+def valid_brand_ids(db: Session) -> set:
+    return set(db.scalars(select(Brand.id)))
+
+
+@router.post("/products/bulk", response_model=BulkResult)
+def bulk_products(data: ProductBulk, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    keys = existing_product_keys(db)
+    brands = valid_brand_ids(db)
+    added, skipped = 0, []
+    for i, it in enumerate(data.items, start=1):
+        name = it.name.strip()
+        unit = (it.unit or "").strip() or None
+        label = f"{name} ({unit})" if unit else name
+        if it.brand_id is not None and it.brand_id not in brands:
+            skipped.append(BulkSkip(row=i, label=label, reason="Brand tidak ditemukan"))
+            continue
+        key = product_key(name, unit, it.brand_id)
+        if key in keys:
+            skipped.append(BulkSkip(row=i, label=label, reason="Sudah ada"))
+            continue
+        keys.add(key)
+        db.add(Product(name=name, unit=unit, brand_id=it.brand_id))
+        added += 1
+    log_activity(db, master, "master", "import_product", f"import {added} produk dari Excel")
+    commit_or_conflict(db, "Ada produk yang bentrok saat import. Coba lagi.")
+    return BulkResult(added=added, skipped=skipped)
+
+
+@router.post("/branches/bulk", response_model=BulkResult)
+def bulk_branches(data: BranchBulk, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    codes = {c.lower() for c in db.scalars(select(Branch.code))}
+    names = {n.lower() for n in db.scalars(select(Branch.name))}
+    brands = valid_brand_ids(db)
+    added, skipped = 0, []
+    for i, it in enumerate(data.items, start=1):
+        code = it.code.strip().upper()
+        name = it.name.strip()
+        label = f"{code} - {name}"
+        if it.brand_id not in brands:
+            skipped.append(BulkSkip(row=i, label=label, reason="Brand tidak ditemukan"))
+            continue
+        if code.lower() in codes:
+            skipped.append(BulkSkip(row=i, label=label, reason="Kode cabang sudah ada"))
+            continue
+        if name.lower() in names:
+            skipped.append(BulkSkip(row=i, label=label, reason="Nama cabang sudah ada"))
+            continue
+        codes.add(code.lower())
+        names.add(name.lower())
+        db.add(Branch(code=code, name=name, brand_id=it.brand_id))
+        added += 1
+    log_activity(db, master, "master", "import_branch", f"import {added} cabang dari Excel")
+    commit_or_conflict(db, "Ada cabang yang bentrok saat import. Coba lagi.")
+    return BulkResult(added=added, skipped=skipped)
+
+
+@router.post("/pics/bulk", response_model=BulkResult)
+def bulk_pics(data: PicBulk, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    keys = {(n.lower(), s, b) for n, s, b in db.execute(select(Pic.name, Pic.shipping, Pic.brand_id)).all()}
+    brands = valid_brand_ids(db)
+    added, skipped = 0, []
+    for i, it in enumerate(data.items, start=1):
+        name = it.name.strip()
+        label = f"{name} ({it.shipping})"
+        if it.brand_id is not None and it.brand_id not in brands:
+            skipped.append(BulkSkip(row=i, label=label, reason="Brand tidak ditemukan"))
+            continue
+        key = (name.lower(), it.shipping, it.brand_id)
+        if key in keys:
+            skipped.append(BulkSkip(row=i, label=label, reason="Sudah ada"))
+            continue
+        keys.add(key)
+        db.add(Pic(name=name, shipping=it.shipping, brand_id=it.brand_id))
+        added += 1
+    log_activity(db, master, "master", "import_pic", f"import {added} PIC dari Excel")
+    commit_or_conflict(db, "Ada PIC yang bentrok saat import. Coba lagi.")
+    return BulkResult(added=added, skipped=skipped)
