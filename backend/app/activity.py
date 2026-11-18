@@ -3,7 +3,15 @@ from sqlalchemy.orm import Session
 from app.models import ActivityLog, User
 
 
-def log_activity(db: Session, user: User | None, module: str, action: str, description: str) -> None:
+def log_activity(
+    db: Session,
+    user: User | None,
+    module: str,
+    action: str,
+    description: str,
+    brand_id: int | None = None,
+    ref: str | None = None,
+) -> None:
     db.add(
         ActivityLog(
             user_id=user.id if user else None,
@@ -11,5 +19,7 @@ def log_activity(db: Session, user: User | None, module: str, action: str, descr
             module=module,
             action=action,
             description=description,
+            brand_id=brand_id,
+            ref=ref,
         )
     )

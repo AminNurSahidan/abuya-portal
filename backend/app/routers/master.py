@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.activity import log_activity
 from app.database import get_db
 from app.deps import get_current_user, get_master
-from app.models import Branch, Brand, Pic, Product, PurchaseRequest, User
+from app.models import WH_BRAND_CODE, Branch, Brand, Pic, Product, PurchaseRequest, User, WhSession, WhZone
 from app.schemas import (
     BranchBulk,
     BranchIn,
@@ -51,6 +51,25 @@ def get_or_404(db: Session, model, obj_id: int, label: str):
     return obj
 
 
+def apply_wh_code(db: Session, branch: Branch, value: str | None) -> None:
+    brand = db.get(Brand, branch.brand_id) if branch.brand_id else None
+    if brand is None or brand.code != WH_BRAND_CODE:
+        branch.wh_code = None
+        return
+    if value is None:
+        return
+    code = value.strip().upper()
+    if not code:
+        branch.wh_code = None
+        return
+    if len(code) != 1 or not code.isalpha():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kode barcode gudang harus 1 huruf (A-Z).")
+    other = db.scalar(select(Branch).where(Branch.wh_code == code, Branch.id != (branch.id or -1)))
+    if other:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Kode barcode {code} sudah dipakai {other.name}.")
+    branch.wh_code = code
+
+
 @router.get("/brands", response_model=list[BrandOut])
 def list_brands(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return db.scalars(select(Brand).order_by(Brand.name)).all()
@@ -65,8 +84,9 @@ def list_branches(brand_id: int | None = None, db: Session = Depends(get_db), us
 def create_branch(data: BranchIn, db: Session = Depends(get_db), master: User = Depends(get_master)):
     ensure_brand(db, data.brand_id)
     branch = Branch(code=data.code.strip().upper(), name=data.name.strip(), brand_id=data.brand_id)
+    apply_wh_code(db, branch, data.wh_code)
     db.add(branch)
-    log_activity(db, master, "master", "create_branch", f"menambahkan cabang {branch.name}")
+    log_activity(db, master, "master", "create_branch", f"menambahkan cabang {branch.name}", brand_id=branch.brand_id)
     commit_or_conflict(db, "Nama atau kode cabang sudah dipakai.")
     db.refresh(branch)
     return branch
@@ -82,7 +102,8 @@ def update_branch(branch_id: int, data: BranchUpdate, db: Session = Depends(get_
         branch.code = data.code.strip().upper()
     if data.name is not None:
         branch.name = data.name.strip()
-    log_activity(db, master, "master", "update_branch", f"memperbarui cabang {branch.name}")
+    apply_wh_code(db, branch, data.wh_code)
+    log_activity(db, master, "master", "update_branch", f"memperbarui cabang {branch.name}", brand_id=branch.brand_id)
     commit_or_conflict(db, "Nama atau kode cabang sudah dipakai.")
     db.refresh(branch)
     return branch
@@ -93,6 +114,11 @@ def delete_branches(data: BulkDelete, db: Session = Depends(get_db), master: Use
     used = db.scalar(select(func.count()).select_from(PurchaseRequest).where(PurchaseRequest.branch_id.in_(data.ids)))
     if used:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ada cabang yang masih dipakai di PR, jadi tidak bisa dihapus.")
+    wh_used = db.scalar(select(func.count()).select_from(WhSession).where(WhSession.branch_id.in_(data.ids))) or db.scalar(
+        select(func.count()).select_from(WhZone).where(WhZone.branch_id.in_(data.ids))
+    )
+    if wh_used:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ada DC yang masih punya zona atau sesi stock opname, jadi tidak bisa dihapus.")
     db.execute(delete(Branch).where(Branch.id.in_(data.ids)))
     log_activity(db, master, "master", "delete_branch", f"menghapus {len(data.ids)} cabang")
     commit_or_conflict(db, "Ada cabang yang masih dipakai di PR, jadi tidak bisa dihapus.")
@@ -114,7 +140,7 @@ def create_product(data: ProductIn, db: Session = Depends(get_db), master: User 
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Produk dengan nama, unit, dan brand itu sudah ada.")
     product = Product(name=name, unit=unit, brand_id=data.brand_id)
     db.add(product)
-    log_activity(db, master, "master", "create_product", f"menambahkan produk {product.display_name}")
+    log_activity(db, master, "master", "create_product", f"menambahkan produk {product.display_name}", brand_id=product.brand_id)
     commit_or_conflict(db, "Produk dengan nama, unit, dan brand itu sudah ada.")
     db.refresh(product)
     return product
@@ -132,7 +158,7 @@ def update_product(product_id: int, data: ProductUpdate, db: Session = Depends(g
     elif data.brand_id is not None:
         ensure_brand(db, data.brand_id)
         product.brand_id = data.brand_id
-    log_activity(db, master, "master", "update_product", f"memperbarui produk {product.display_name}")
+    log_activity(db, master, "master", "update_product", f"memperbarui produk {product.display_name}", brand_id=product.brand_id)
     commit_or_conflict(db, "Produk dengan nama, unit, dan brand itu sudah ada.")
     db.refresh(product)
     return product
@@ -164,7 +190,7 @@ def create_pic(data: PicIn, db: Session = Depends(get_db), master: User = Depend
     ensure_brand(db, data.brand_id)
     pic = Pic(name=data.name.strip(), shipping=data.shipping, brand_id=data.brand_id)
     db.add(pic)
-    log_activity(db, master, "master", "create_pic", f"menambahkan PIC {pic.name}")
+    log_activity(db, master, "master", "create_pic", f"menambahkan PIC {pic.name}", brand_id=pic.brand_id)
     commit_or_conflict(db, "PIC dengan nama, shipping, dan brand itu sudah ada.")
     db.refresh(pic)
     return pic
@@ -182,7 +208,7 @@ def update_pic(pic_id: int, data: PicUpdate, db: Session = Depends(get_db), mast
     elif data.brand_id is not None:
         ensure_brand(db, data.brand_id)
         pic.brand_id = data.brand_id
-    log_activity(db, master, "master", "update_pic", f"memperbarui PIC {pic.name}")
+    log_activity(db, master, "master", "update_pic", f"memperbarui PIC {pic.name}", brand_id=pic.brand_id)
     commit_or_conflict(db, "PIC dengan nama, shipping, dan brand itu sudah ada.")
     db.refresh(pic)
     return pic

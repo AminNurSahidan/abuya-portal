@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-Role = Literal["SM", "AM", "AMKA", "PIC", "Master"]
+ROLE_PATTERN = r"^[A-Za-z0-9 ._-]+$"
 PRStatus = Literal["Pending", "Approved", "Rejected", "Expired"]
 Shipping = Literal["Direct", "Indirect"]
 
@@ -35,18 +35,21 @@ class BranchOut(ORM):
     code: str
     name: str
     brand: BrandOut | None = None
+    wh_code: str | None = None
 
 
 class BranchIn(BaseModel):
     code: str = Field(min_length=1, max_length=30)
     name: str = Field(min_length=2, max_length=150)
     brand_id: int
+    wh_code: str | None = Field(default=None, max_length=1)
 
 
 class BranchUpdate(BaseModel):
     code: str | None = Field(default=None, min_length=1, max_length=30)
     name: str | None = Field(default=None, min_length=2, max_length=150)
     brand_id: int | None = None
+    wh_code: str | None = Field(default=None, max_length=1)
 
 
 class ProductOut(ORM):
@@ -94,21 +97,73 @@ class BulkDelete(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=500)
 
 
+class RoleOut(ORM):
+    id: int
+    name: str
+    brand: BrandOut | None = None
+    perms: list[str] = Field(default=[], serialization_alias="permissions")
+    is_locked: bool
+    user_count: int = 0
+
+
+class RoleIn(BaseModel):
+    name: str = Field(min_length=1, max_length=50, pattern=ROLE_PATTERN)
+    brand_id: int | None = None
+    permissions: list[str] = Field(default=[], max_length=50)
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50, pattern=ROLE_PATTERN)
+    brand_id: int | None = None
+    clear_brand: bool = False
+    permissions: list[str] | None = Field(default=None, max_length=50)
+
+
+class PermissionOut(BaseModel):
+    key: str
+    label: str
+
+
+class PermissionCell(BaseModel):
+    key: str
+    label: str
+
+
+class PermissionRow(BaseModel):
+    label: str
+    cells: dict[str, str]
+
+
+class PermissionGroup(BaseModel):
+    label: str
+    rows: list[PermissionRow]
+
+
+class PermissionGrid(BaseModel):
+    columns: list[PermissionCell]
+    groups: list[PermissionGroup]
+    flat: list[PermissionOut]
+
+
 class UserOut(ORM):
     id: uuid.UUID
     username: str
-    role: Role
+    role: str
+    permissions: list[str] = []
     brand: BrandOut | None = None
     is_active: bool
     last_login_at: datetime | None
     created_at: datetime
     branches: list[BranchOut] = []
+    session_active: bool = False
+    session_device: str | None = None
+    session_seen_at: datetime | None = None
 
 
 class UserCreate(BaseModel):
     username: str = Field(pattern=USERNAME_PATTERN)
     password: str = Password
-    role: Role
+    role: str = Field(min_length=1, max_length=50)
     brand_id: int | None = None
 
     @field_validator("username", mode="before")
@@ -118,9 +173,21 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    role: Role | None = None
+    role: str | None = Field(default=None, min_length=1, max_length=50)
     brand_id: int | None = None
     is_active: bool | None = None
+
+
+class UserBulkItem(BaseModel):
+    username: str = Field(max_length=120)
+    password: str = Field(max_length=200)
+    role: str = Field(max_length=50)
+    brand_id: int | None = None
+    branch_ids: list[int] = Field(default=[], max_length=1000)
+
+
+class UserBulk(BaseModel):
+    items: list[UserBulkItem] = Field(min_length=1, max_length=300)
 
 
 class UserBulkDelete(BaseModel):
@@ -159,7 +226,38 @@ class ActivityOut(ORM):
     module: str
     action: str
     description: str
+    ref: str | None = None
     created_at: datetime
+
+
+class LogOut(ActivityOut):
+    brand: BrandOut | None = None
+
+
+class LogList(BaseModel):
+    items: list[LogOut]
+    total: int
+    page: int
+    size: int
+    by_module: dict[str, int]
+    modules: dict[str, str]
+
+
+class DocDelete(BaseModel):
+    ids: list[int] = Field(default=[], max_length=1000)
+    all: bool = False
+    status: PRStatus | None = None
+    branch_id: list[int] | None = None
+    shipping: Shipping | None = None
+    q: str | None = Field(default=None, max_length=200)
+    date_from: date | None = None
+    date_to: date | None = None
+    brand_id: int | None = None
+
+
+class DocDeleteResult(BaseModel):
+    deleted_pr: int
+    deleted_po: int
 
 
 class ItemIn(BaseModel):
@@ -215,6 +313,8 @@ class PROut(ORM):
 class PRDetail(PROut):
     items: list[ItemOut] = []
     can_edit: bool = False
+    can_approve: bool = False
+    can_reject: bool = False
     can_approve_now: bool = False
 
 

@@ -8,17 +8,12 @@ from app.models import Branch, PurchaseRequest, User
 
 WIB = timezone(timedelta(hours=7))
 
-CREATE_ROLES = ("SM", "AMKA", "Master")
-APPROVE_ROLES = ("AM", "AMKA", "Master")
-APPROVE_NOW_ROLES = ("AMKA", "Master")
-
-
 def today_wib() -> date:
     return datetime.now(WIB).date()
 
 
 def effective_brand_id(user: User, brand_id: int | None) -> int | None:
-    if user.role == "Master":
+    if user.is_master:
         return brand_id
     return user.brand_id
 
@@ -58,26 +53,33 @@ def accessible_branches(db: Session, user: User, brand_id: int | None = None) ->
 
 
 def can_access_branch(user: User, branch: Branch) -> bool:
-    if user.role != "Master" and user.brand_id is not None and branch.brand_id != user.brand_id:
+    if not user.is_master and user.brand_id is not None and branch.brand_id != user.brand_id:
         return False
     ids = user_branch_ids(user)
     return ids is None or branch.id in ids
 
 
 def can_create_pr(user: User) -> bool:
-    if user.role not in CREATE_ROLES:
+    if not user.can("pr.create"):
         return False
     if user.is_branch_scoped and not user.branches:
         return False
     return True
 
 
-def can_edit_pr(user: User, pr: PurchaseRequest) -> bool:
-    return pr.status == "Pending" and user.role in APPROVE_ROLES and can_access_branch(user, pr.branch)
+REVIEW_PERMS = ("pr.approve", "pr.reject", "pr.update")
+
+
+def can_review_pr(user: User, pr: PurchaseRequest, perm: str | None = None) -> bool:
+    if pr.status != "Pending" or not can_access_branch(user, pr.branch):
+        return False
+    if perm:
+        return user.can(perm)
+    return any(user.can(p) for p in REVIEW_PERMS)
 
 
 def require_master(user: User) -> None:
-    if user.role != "Master":
+    if not user.is_master:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cuma Master yang boleh akses fitur ini.")
 
 

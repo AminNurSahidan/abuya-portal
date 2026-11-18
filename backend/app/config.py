@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     cors_origins: str = ""
     frontend_dir: str = ""
     auto_create_tables: bool = False
+    session_idle_minutes: int = 30
 
     @field_validator("database_url")
     @classmethod

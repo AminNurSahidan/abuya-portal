@@ -92,12 +92,99 @@ def sync_unique_constraints() -> list[str]:
     return changes
 
 
+def widen_role_column() -> list[str]:
+    if engine.dialect.name != "postgresql":
+        return []
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if not insp.has_table("users"):
+            return []
+        col = next((c for c in insp.get_columns("users") if c["name"] == "role"), None)
+        length = getattr(col["type"], "length", None) if col else None
+        if length is not None and length < 50:
+            conn.execute(text('ALTER TABLE "users" ALTER COLUMN "role" TYPE VARCHAR(50)'))
+            return ["users: kolom role diperlebar jadi 50 karakter"]
+    return []
+
+
+NEW_COLUMNS = [
+    ("activity_logs", "brand_id", "INTEGER REFERENCES brands(id) ON DELETE SET NULL"),
+    ("activity_logs", "ref", "VARCHAR(60)"),
+    ("users", "session_token", "VARCHAR(64)"),
+    ("users", "session_seen_at", "TIMESTAMP WITH TIME ZONE"),
+    ("users", "session_device", "VARCHAR(120)"),
+    ("branches", "wh_code", "VARCHAR(1)"),
+]
+
+
+def add_missing_columns() -> list[str]:
+    changes = []
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        for table, col, ddl in NEW_COLUMNS:
+            if not insp.has_table(table):
+                continue
+            if any(c["name"] == col for c in insp.get_columns(table)):
+                continue
+            conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{col}" {ddl}'))
+            conn.execute(text(f'CREATE INDEX IF NOT EXISTS "ix_{table}_{col}" ON "{table}" ("{col}")'))
+            changes.append(f"{table}: tambah kolom {col}")
+    return changes
+
+
+def sync_schema() -> list[str]:
+    return sync_unique_constraints() + widen_role_column() + add_missing_columns()
+
+
+ONE_TIME_GRANTS = [("grant_log_view", "log.view")]
+
+
+def apply_one_time_grants(db) -> list[str]:
+    changes = []
+    for key, perm in ONE_TIME_GRANTS:
+        if db.get(models.AppSetting, key) is not None:
+            continue
+        for r in db.scalars(select(models.Role)).all():
+            perms = set(r.permissions or [])
+            if perm not in perms:
+                perms.add(perm)
+                r.permissions = [k for k in models.PERMISSIONS if k in perms]
+                changes.append(f"roles: {r.name} dapat hak akses {models.PERMISSIONS[perm]}")
+        db.add(models.AppSetting(key=key, value="done"))
+    db.flush()
+    return changes
+
+
+def ensure_default_roles(db) -> list[str]:
+    changes = []
+    if db.scalar(select(func.count()).select_from(models.Role)):
+        if db.scalar(select(models.Role).where(models.Role.name == models.MASTER_ROLE)) is None:
+            db.add(models.Role(name=models.MASTER_ROLE, permissions=list(models.PERMISSIONS)))
+    else:
+        for name, perms in models.DEFAULT_ROLES:
+            db.add(models.Role(name=name, permissions=perms))
+        db.flush()
+        return changes
+    roles = db.scalars(select(models.Role)).all()
+    if not any(k in models.OLD_PERMISSION_KEYS for r in roles for k in (r.permissions or [])):
+        return changes
+    for r in roles:
+        perms = {models.OLD_PERMISSION_KEYS.get(k, k) for k in (r.permissions or [])}
+        perms.update(("pr.view", "po.view"))
+        r.permissions = [k for k in models.PERMISSIONS if k in perms]
+        changes.append(f"roles: hak akses {r.name} dipindah ke format baru")
+    db.flush()
+    return changes
+
+
 def init_db() -> None:
     Base.metadata.create_all(engine)
-    for line in sync_unique_constraints():
+    for line in sync_schema():
         print(line)
     with SessionLocal() as db:
         ensure_default_brands(db)
+        for line in ensure_default_roles(db) + apply_one_time_grants(db):
+            print(line)
         db.commit()
     print("Tabel database siap.")
 
@@ -263,6 +350,120 @@ def seed_demo() -> None:
         print(f"Password semua user demo: {DEMO_PASSWORD}")
 
 
+WH_DEMO_DCS = [("DCA", "DC A Cikarang", "A"), ("DCB", "DC B Cibitung", "B")]
+WH_DEMO_LAYOUT = {
+    "Zona Dry": ["Rak 01", "Rak 02", "Rak 03"],
+    "Zona Chiller": ["Chiller 01", "Chiller 02"],
+    "Zona Frozen": ["Freezer 01"],
+}
+WH_DEMO_PRODUCTS = [
+    ("Tepung Bumbu Original 1kg", "Bumbu", "Tepung", "Pack"),
+    ("Tepung Bumbu Pedas 1kg", "Bumbu", "Tepung", "Pack"),
+    ("Minyak Goreng 18L", "Minyak", "Minyak", "Jerigen"),
+    ("Saus Sambal 5kg", "Saus", "Sambal", "Galon"),
+    ("Saus Tomat 5kg", "Saus", "Tomat", "Galon"),
+    ("Mayonnaise 1kg", "Saus", "Mayo", "Pack"),
+    ("Keju Slice 84pcs", "Dairy", "Keju", "Pack"),
+    ("Susu UHT 1L", "Dairy", "Susu", "Karton"),
+    ("Ayam Potong 9pcs", "Frozen", "Ayam", "Box"),
+    ("Kentang Goreng 2.5kg", "Frozen", "Kentang", "Pack"),
+    ("Nugget Ayam 1kg", "Frozen", "Olahan", "Pack"),
+    ("Paper Box Ayam", "Packaging", "Box", "Ikat"),
+    ("Cup Saus 1oz", "Packaging", "Cup", "Slop"),
+    ("Kantong Plastik L", "Packaging", "Plastik", "Pack"),
+]
+WH_DEMO_ROLES = [
+    ("Admin DC", [
+        "wh.session.view", "wh.session.create", "wh.session.update", "wh.session.delete", "wh.count.input", "wh.final.approve",
+        "wh.structure.view", "wh.structure.create", "wh.structure.update", "wh.structure.delete",
+        "wh.product.view", "wh.product.create", "wh.product.update", "wh.product.delete",
+        "wh.data.import", "wh.data.export", "branch.all", "log.view",
+    ]),
+    ("Checker DC", ["wh.session.view", "wh.count.input", "wh.structure.view", "wh.product.view", "log.view"]),
+]
+WH_DEMO_USERS = [("admin.dc", "Admin DC", []), ("checker.dca", "Checker DC", ["DC A Cikarang"]), ("checker.dcb", "Checker DC", ["DC B Cibitung"])]
+
+
+BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+
+
+def seed_wh_demo() -> None:
+    init_db()
+    with SessionLocal() as db:
+        if db.scalar(select(func.count()).select_from(models.WhSession)):
+            print("Sudah ada sesi stock opname, seed demo gudang dilewati.")
+            return
+        rng = random.Random(11)
+        brands = ensure_default_brands(db)
+        dc_brand = brands[models.WH_BRAND_CODE]
+        for name, perms in WH_DEMO_ROLES:
+            if db.scalar(select(models.Role).where(models.Role.name == name)) is None:
+                db.add(models.Role(name=name, brand_id=dc_brand.id, permissions=[p for p in models.PERMISSIONS if p in perms]))
+        dcs = {}
+        for code, name, letter in WH_DEMO_DCS:
+            dc = db.scalar(select(models.Branch).where(models.Branch.name == name))
+            if dc is None:
+                dc = models.Branch(code=code, name=name, brand_id=dc_brand.id, wh_code=letter)
+                db.add(dc)
+                db.flush()
+            dcs[name] = dc
+        db.flush()
+        for username, role, branch_names in WH_DEMO_USERS:
+            if db.scalar(select(models.User).where(models.User.username == username)) is None:
+                db.add(models.User(username=username, role=role, brand_id=dc_brand.id, password_hash=hash_password(DEMO_PASSWORD), branches=[dcs[n] for n in branch_names]))
+        made_products = 0
+        for dc in dcs.values():
+            products = []
+            for i, (pname, cat, sub, unit) in enumerate(WH_DEMO_PRODUCTS, start=1):
+                barcode = f"{dc.wh_code}{i:05d}"
+                p = db.get(models.WhProduct, barcode)
+                if p is None:
+                    p = models.WhProduct(barcode=barcode, branch_id=dc.id, name=pname, product_code=f"SKU-{i:03d}", category=cat, sub_category=sub, unit=unit)
+                    db.add(p)
+                    made_products += 1
+                products.append(p)
+            db.flush()
+            pool = list(products)
+            rng.shuffle(pool)
+            for zname, sectors in WH_DEMO_LAYOUT.items():
+                zone = models.WhZone(branch_id=dc.id, name=zname)
+                db.add(zone)
+                db.flush()
+                for sname in sectors:
+                    sector = models.WhSector(zone_id=zone.id, name=sname)
+                    db.add(sector)
+                    db.flush()
+                    for seq, p in enumerate(rng.sample(pool, k=4), start=1):
+                        db.add(models.WhPlacement(sector_id=sector.id, barcode=p.barcode, sequence=seq))
+            db.flush()
+            today = today_wib()
+            last_month = (today.replace(day=1) - timedelta(days=1)).replace(day=28)
+            done = models.WhSession(branch_id=dc.id, name=f"SO {BULAN[last_month.month - 1]} {last_month.year}", session_date=last_month, status="Final", created_by="admin.dc", finalized_by="admin.dc", finalized_at=datetime.now(timezone.utc) - timedelta(days=10))
+            current = models.WhSession(branch_id=dc.id, name=f"SO {BULAN[today.month - 1]} {today.year}", session_date=today, status="Aktif", created_by="admin.dc")
+            db.add_all([done, current])
+            db.flush()
+            placements = db.execute(
+                select(models.WhPlacement.sector_id, models.WhPlacement.barcode)
+                .join(models.WhSector, models.WhSector.id == models.WhPlacement.sector_id)
+                .join(models.WhZone, models.WhZone.id == models.WhSector.zone_id)
+                .where(models.WhZone.branch_id == dc.id)
+            ).all()
+            checker = "checker.dca" if dc.wh_code == "A" else "checker.dcb"
+            totals = defaultdict(float)
+            for sector_id, barcode in placements:
+                qty = rng.randint(3, 120)
+                db.add(models.WhCount(session_id=done.id, sector_id=sector_id, barcode=barcode, qty=qty, updated_by=checker))
+                totals[barcode] += qty
+                if rng.random() < 0.55:
+                    db.add(models.WhCount(session_id=current.id, sector_id=sector_id, barcode=barcode, qty=rng.randint(3, 120), updated_by=checker))
+            for barcode, qty in totals.items():
+                adj = qty if rng.random() < 0.85 else max(0, qty - rng.randint(1, 5))
+                db.add(models.WhFinal(session_id=done.id, barcode=barcode, qty_count=qty, qty_final=adj))
+        db.commit()
+        print(f"Data demo gudang dibuat: {len(dcs)} DC, {made_products} produk gudang, role Admin DC & Checker DC, user {', '.join(u for u, _, _ in WH_DEMO_USERS)}.")
+        print(f"Password user demo gudang: {DEMO_PASSWORD}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -270,6 +471,7 @@ def main() -> None:
     reset = sub.add_parser("reset-db")
     reset.add_argument("--yes", action="store_true")
     sub.add_parser("seed-demo")
+    sub.add_parser("seed-wh-demo")
     master = sub.add_parser("create-master")
     master.add_argument("--username", required=True)
     master.add_argument("--password")
@@ -281,6 +483,8 @@ def main() -> None:
         reset_db(args.yes)
     elif args.cmd == "seed-demo":
         seed_demo()
+    elif args.cmd == "seed-wh-demo":
+        seed_wh_demo()
     elif args.cmd == "create-master":
         create_master(args.username, args.password)
 

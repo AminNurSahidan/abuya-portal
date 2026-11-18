@@ -73,7 +73,7 @@ def summary(
         return [TopItem(item_name=n, value=int(v or 0)) for n, v in db.execute(stmt).all()]
 
     activity_stmt = select(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(6)
-    if user.role != "Master":
+    if not user.is_master:
         activity_stmt = activity_stmt.where(ActivityLog.user_id == user.id)
 
     return DashboardSummary(

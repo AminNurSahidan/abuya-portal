@@ -1,15 +1,17 @@
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.activity import log_activity
 from app.database import get_db
-from app.deps import get_current_user
-from app.models import Branch, Pic, Product, PurchaseOrder, PurchaseRequest, PurchaseRequestItem, User
+from app.deps import get_current_user, get_master
+from app.models import Branch, DocumentCounter, Pic, Product, PurchaseOrder, PurchaseRequest, PurchaseRequestItem, User
 from app.numbering import next_number
 from app.schemas import (
+    DocDelete,
+    DocDeleteResult,
     ExportRow,
     ItemIn,
     ItemOut,
@@ -26,11 +28,10 @@ from app.schemas import (
     StageSummary,
 )
 from app.scope import (
-    APPROVE_NOW_ROLES,
     accessible_branches,
     can_access_branch,
     can_create_pr,
-    can_edit_pr,
+    can_review_pr,
     expire_overdue,
     scope_by_branch,
     scope_catalog,
@@ -107,16 +108,36 @@ def load_pr(db: Session, user: User, pr_id: int) -> PurchaseRequest:
 
 def pr_detail(pr: PurchaseRequest, user: User) -> PRDetail:
     out = PRDetail.model_validate(pr)
-    out.can_edit = can_edit_pr(user, pr)
-    out.can_approve_now = out.can_edit and user.role in APPROVE_NOW_ROLES
+    out.can_edit = can_review_pr(user, pr, "pr.update")
+    out.can_approve = can_review_pr(user, pr, "pr.approve")
+    out.can_reject = can_review_pr(user, pr, "pr.reject")
+    out.can_approve_now = out.can_approve
     return out
 
 
-def require_editable(user: User, pr: PurchaseRequest) -> None:
+REVIEW_DENIED = {
+    "pr.update": "Role kamu tidak punya akses untuk mengubah item PR ini.",
+    "pr.approve": "Role kamu tidak punya akses untuk menyetujui PR ini.",
+    "pr.reject": "Role kamu tidak punya akses untuk menolak PR ini.",
+    None: "Role kamu tidak punya akses untuk mengubah PR ini.",
+}
+
+
+def require_view(user: User, perm: str) -> None:
+    if not user.can(perm):
+        label = "Purchase Request" if perm == "pr.view" else "Purchase Order"
+        raise forbidden(f"Role kamu tidak punya akses melihat {label}.")
+
+
+def require_editable(user: User, pr: PurchaseRequest, perm: str | None = "pr.update") -> None:
     if pr.status != "Pending":
         raise bad_request(f"PR sudah {pr.status}, tidak bisa diubah lagi.")
-    if not can_edit_pr(user, pr):
-        raise forbidden("Role kamu tidak punya akses untuk mengubah PR ini.")
+    if not can_review_pr(user, pr, perm):
+        raise forbidden(REVIEW_DENIED[perm])
+
+
+def log_pr(db: Session, user: User, pr: PurchaseRequest, action: str, description: str) -> None:
+    log_activity(db, user, "approval", action, description, brand_id=pr.brand_id, ref=pr.number)
 
 
 def touch(pr: PurchaseRequest, user: User) -> None:
@@ -141,6 +162,8 @@ def release_po(db: Session, pr: PurchaseRequest, user: User) -> PurchaseOrder:
 
 @router.get("/purchase-requests/form-options", response_model=PRFormOptions)
 def form_options(brand_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not (user.can("pr.view") or user.can("pr.create")):
+        require_view(user, "pr.view")
     branches = accessible_branches(db, user, brand_id)
     products = db.scalars(scope_catalog(select(Product), Product.brand_id, user, brand_id).order_by(Product.name, Product.unit)).all()
     pics = db.scalars(scope_catalog(select(Pic), Pic.brand_id, user, brand_id).order_by(Pic.name)).all()
@@ -149,7 +172,7 @@ def form_options(brand_id: int | None = None, db: Session = Depends(get_db), use
         products=products,
         pics=pics,
         can_create=can_create_pr(user),
-        can_approve_now=user.role in APPROVE_NOW_ROLES,
+        can_approve_now=user.can("pr.approve_now"),
     )
 
 
@@ -169,7 +192,24 @@ def list_prs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_view(user, "pr.view")
     expire_overdue(db)
+    stmt = filtered_prs(user, status_, branch_id, shipping, q, date_from, date_to, brand_id)
+    stmt = apply_sort(stmt, PR_SORT, sort, direction, PurchaseRequest.created_at)
+    items, total = paginate(db, stmt, page, size)
+    return PRList(items=items, total=total, page=page, size=size)
+
+
+def filtered_prs(
+    user: User,
+    status_: str | None,
+    branch_id: list[int] | None,
+    shipping: str | None,
+    q: str | None,
+    date_from: date | None,
+    date_to: date | None,
+    brand_id: int | None,
+):
     stmt = pr_base(user, brand_id)
     if status_:
         stmt = stmt.where(PurchaseRequest.status == status_)
@@ -191,9 +231,64 @@ def list_prs(
                 func.lower(func.coalesce(PurchaseRequest.notes, "")).like(like),
             )
         )
-    stmt = apply_sort(stmt, PR_SORT, sort, direction, PurchaseRequest.created_at)
-    items, total = paginate(db, stmt, page, size)
-    return PRList(items=items, total=total, page=page, size=size)
+    return stmt
+
+
+def delete_pairs(db: Session, master: User, prs: list[PurchaseRequest], source: str) -> DocDeleteResult:
+    pr_ids = [p.id for p in prs]
+    if not pr_ids:
+        return DocDeleteResult(deleted_pr=0, deleted_po=0)
+    po_rows = db.execute(select(PurchaseOrder.id, PurchaseOrder.number).where(PurchaseOrder.pr_id.in_(pr_ids))).all()
+    for p in prs:
+        po_no = next((n for i, n in po_rows if p.po and p.po.id == i), None)
+        log_activity(
+            db,
+            master,
+            "approval",
+            "delete_pr" if source == "pr" else "delete_po",
+            f"menghapus {p.number}" + (f" dan {po_no}" if po_no else "") + " (Master)",
+            brand_id=p.brand_id,
+            ref=p.number,
+        )
+    for chunk in range(0, len(pr_ids), 500):
+        part = pr_ids[chunk:chunk + 500]
+        db.execute(delete(PurchaseOrder).where(PurchaseOrder.pr_id.in_(part)))
+        db.execute(delete(PurchaseRequestItem).where(PurchaseRequestItem.pr_id.in_(part)))
+        db.execute(delete(PurchaseRequest).where(PurchaseRequest.id.in_(part)))
+    db.flush()
+    if not db.scalar(select(func.count()).select_from(PurchaseRequest)):
+        db.execute(delete(DocumentCounter).where(DocumentCounter.prefix == "PR"))
+    if not db.scalar(select(func.count()).select_from(PurchaseOrder)):
+        db.execute(delete(DocumentCounter).where(DocumentCounter.prefix == "PO"))
+    db.commit()
+    return DocDeleteResult(deleted_pr=len(pr_ids), deleted_po=len(po_rows))
+
+
+def require_targets(data: DocDelete) -> None:
+    if not data.all and not data.ids:
+        raise bad_request("Pilih dokumen yang mau dihapus dulu.")
+
+
+@router.post("/purchase-requests/delete", response_model=DocDeleteResult)
+def delete_prs(data: DocDelete, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    require_targets(data)
+    if data.all:
+        stmt = filtered_prs(master, data.status, data.branch_id, data.shipping, data.q, data.date_from, data.date_to, data.brand_id)
+    else:
+        stmt = pr_base(master, None).where(PurchaseRequest.id.in_(data.ids))
+    prs = list(db.scalars(stmt).unique())
+    return delete_pairs(db, master, prs, "pr")
+
+
+@router.post("/purchase-orders/delete", response_model=DocDeleteResult)
+def delete_pos(data: DocDelete, db: Session = Depends(get_db), master: User = Depends(get_master)):
+    require_targets(data)
+    if data.all:
+        stmt = filtered_pos(master, data.shipping, data.branch_id, data.q, data.date_from, data.date_to, data.brand_id)
+    else:
+        stmt = po_base(master, None).where(PurchaseOrder.id.in_(data.ids))
+    prs = [po.pr for po in db.scalars(stmt).unique()]
+    return delete_pairs(db, master, prs, "po")
 
 
 @router.get("/purchase-requests/summary", response_model=StageSummary)
@@ -203,6 +298,7 @@ def pr_summary(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_view(user, "pr.view")
     expire_overdue(db)
     count_stmt = scope_by_branch(
         select(PurchaseRequest.status, func.count()).group_by(PurchaseRequest.status),
@@ -238,7 +334,7 @@ def create_pr(data: PRIn, db: Session = Depends(get_db), user: User = Depends(ge
         if user.is_branch_scoped and not user.branches:
             raise forbidden("Akun kamu belum punya mapping cabang. Hubungi Master.")
         raise forbidden(f"Role {user.role} tidak bisa membuat Purchase Request.")
-    if data.approve_now and user.role not in APPROVE_NOW_ROLES:
+    if data.approve_now and not user.can("pr.approve_now"):
         raise forbidden(f"Role {user.role} tidak bisa langsung menyetujui PR.")
 
     if data.required_date <= today_wib():
@@ -287,7 +383,7 @@ def create_pr(data: PRIn, db: Session = Depends(get_db), user: User = Depends(ge
     db.flush()
     if data.approve_now:
         release_po(db, pr, user)
-    log_activity(db, user, "approval", "create_pr", f"membuat {pr.number} untuk {branch.name}" + (" (langsung disetujui)" if data.approve_now else ""))
+    log_pr(db, user, pr, "create_pr", f"membuat {pr.number} untuk {branch.name}" + (" (auto approve)" if data.approve_now else ""))
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -295,6 +391,7 @@ def create_pr(data: PRIn, db: Session = Depends(get_db), user: User = Depends(ge
 
 @router.get("/purchase-requests/{pr_id}", response_model=PRDetail)
 def get_pr(pr_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    require_view(user, "pr.view")
     expire_overdue(db)
     return pr_detail(load_pr(db, user, pr_id), user)
 
@@ -309,6 +406,7 @@ def add_item(pr_id: int, data: ItemIn, db: Session = Depends(get_db), user: User
         raise bad_request("Barang ini sudah ada di PR.")
     pr.items.append(PurchaseRequestItem(product_id=product.id, item_name=product.display_name, qty=data.qty))
     touch(pr, user)
+    log_pr(db, user, pr, "add_item", f"menambah {product.display_name} x{data.qty} di {pr.number}")
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -322,8 +420,11 @@ def update_item(pr_id: int, item_id: int, data: ItemQty, db: Session = Depends(g
     item = next((i for i in pr.items if i.id == item_id), None)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item tidak ditemukan.")
+    old_qty = item.qty
     item.qty = data.qty
     touch(pr, user)
+    if old_qty != data.qty:
+        log_pr(db, user, pr, "update_item", f"mengubah qty {item.item_name} dari {old_qty} jadi {data.qty} di {pr.number}")
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -341,6 +442,7 @@ def delete_item(pr_id: int, item_id: int, db: Session = Depends(get_db), user: U
         raise bad_request("PR minimal harus punya 1 item.")
     pr.items.remove(item)
     touch(pr, user)
+    log_pr(db, user, pr, "delete_item", f"menghapus {item.item_name} dari {pr.number}")
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -349,8 +451,9 @@ def delete_item(pr_id: int, item_id: int, db: Session = Depends(get_db), user: U
 @router.post("/purchase-requests/{pr_id}/touch", response_model=PRDetail)
 def save_draft(pr_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     pr = load_pr(db, user, pr_id)
-    require_editable(user, pr)
+    require_editable(user, pr, None)
     touch(pr, user)
+    log_pr(db, user, pr, "save_draft", f"menyimpan draft {pr.number}")
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -360,13 +463,13 @@ def save_draft(pr_id: int, db: Session = Depends(get_db), user: User = Depends(g
 def approve_pr(pr_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     expire_overdue(db)
     pr = load_pr(db, user, pr_id)
-    require_editable(user, pr)
+    require_editable(user, pr, "pr.approve")
     if not pr.items:
         raise bad_request("PR belum punya item.")
     pr.status = "Approved"
     touch(pr, user)
     po = release_po(db, pr, user)
-    log_activity(db, user, "approval", "approve_pr", f"menyetujui {pr.number}, {po.number} terbit")
+    log_pr(db, user, pr, "approve_pr", f"menyetujui {pr.number}, {po.number} terbit")
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -376,10 +479,10 @@ def approve_pr(pr_id: int, db: Session = Depends(get_db), user: User = Depends(g
 def reject_pr(pr_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     expire_overdue(db)
     pr = load_pr(db, user, pr_id)
-    require_editable(user, pr)
+    require_editable(user, pr, "pr.reject")
     pr.status = "Rejected"
     touch(pr, user)
-    log_activity(db, user, "approval", "reject_pr", f"menolak {pr.number}")
+    log_pr(db, user, pr, "reject_pr", f"menolak {pr.number}")
     db.commit()
     db.refresh(pr)
     return pr_detail(pr, user)
@@ -431,6 +534,7 @@ def list_pos(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_view(user, "po.view")
     stmt = filtered_pos(user, shipping, branch_id, q, date_from, date_to, brand_id)
     stmt = apply_sort(stmt, PO_SORT, sort, direction, PurchaseOrder.created_at)
     items, total = paginate(db, stmt, page, size)
@@ -444,6 +548,7 @@ def po_summary(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_view(user, "po.view")
     count_stmt = scope_by_branch(
         select(PurchaseRequest.shipping_category, func.count(PurchaseOrder.id))
         .join(PurchaseRequest, PurchaseRequest.id == PurchaseOrder.pr_id)
@@ -487,8 +592,8 @@ def export_pos(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role != "PIC":
-        raise forbidden("Export Purchase Order hanya bisa dilakukan oleh role PIC.")
+    if not user.can("po.export"):
+        raise forbidden("Role kamu tidak punya akses Export Purchase Order.")
     stmt = filtered_pos(user, shipping, branch_id, q, date_from, date_to, brand_id)
     if po_id is not None:
         stmt = stmt.where(PurchaseOrder.id == po_id)
@@ -521,6 +626,7 @@ def export_pos(
 
 @router.get("/purchase-orders/{po_id}", response_model=PODetail)
 def get_po(po_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    require_view(user, "po.view")
     po = db.scalar(po_base(user, None).where(PurchaseOrder.id == po_id))
     if po is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PO tidak ditemukan.")

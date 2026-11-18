@@ -9,17 +9,20 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import auth, dashboard, master, purchasing, users
+from app.routers import auth, dashboard, logs, master, purchasing, roles, users, warehouse
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     if settings.auto_create_tables:
-        from app.cli import ensure_default_brands
+        from app.cli import apply_one_time_grants, ensure_default_brands, ensure_default_roles, sync_schema
 
         Base.metadata.create_all(engine)
+        sync_schema()
         with Session(engine) as db:
             ensure_default_brands(db)
+            ensure_default_roles(db)
+            apply_one_time_grants(db)
             db.commit()
     yield
 
@@ -43,8 +46,11 @@ if settings.cors_list:
 
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(roles.router)
 app.include_router(master.router)
 app.include_router(dashboard.router)
+app.include_router(logs.router)
+app.include_router(warehouse.router)
 app.include_router(purchasing.router)
 
 

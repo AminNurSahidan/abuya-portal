@@ -20,13 +20,13 @@ def verify_password(password: str, hashed: str) -> bool:
 DUMMY_HASH = hash_password("dummy-password-for-timing")
 
 
-def create_access_token(user_id: str, token_version: int, remember: bool) -> tuple[str, datetime]:
+def create_access_token(user_id: str, token_version: int, remember: bool, sid: str | None = None) -> tuple[str, datetime]:
     now = datetime.now(timezone.utc)
     if remember:
         expires = now + timedelta(days=settings.remember_token_days)
     else:
         expires = now + timedelta(minutes=settings.access_token_minutes)
-    payload = {"sub": user_id, "ver": token_version, "iat": now, "exp": expires}
+    payload = {"sub": user_id, "ver": token_version, "sid": sid, "iat": now, "exp": expires}
     token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     return token, expires
 
