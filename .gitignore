@@ -4,4 +4,5 @@ __pycache__/
 *.pyc
 .env
 *.db
-.DS_Store
+.DS_Store.env
+*.dump
