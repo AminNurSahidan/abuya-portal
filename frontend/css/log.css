@@ -1,0 +1,23 @@
+#logArea { display: flex; flex-direction: column; gap: 20px; }
+
+#logArea[hidden] { display: none; }
+
+.tab .material-symbols-outlined { font-size: 18px; }
+
+.log-time { white-space: nowrap; }
+
+.log-act { display: flex; align-items: flex-start; gap: 10px; min-width: 260px; }
+
+.log-icon { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+.log-icon .material-symbols-outlined { font-size: 16px; }
+
+.log-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+
+.log-text strong { color: #0f172a; font-weight: 600; }
+
+.log-ref { white-space: nowrap; }
+
+.log-empty-note { max-width: 420px; margin: 0 auto; }
+
+.log-ref .muted { color: var(--muted-2); }

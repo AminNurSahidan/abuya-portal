@@ -1,0 +1,21 @@
+#area { display: flex; flex-direction: column; gap: 20px; }
+
+#area[hidden] { display: none; }
+
+.dc-card-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); font-weight: 500; }
+
+.dc-card-stats b { color: #0f172a; font-weight: 700; }
+
+.dc-card-last { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+.dc-card-last span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.branch-card-name .name-row { display: flex; align-items: center; gap: 6px; }
+
+.session-name { display: flex; flex-direction: column; gap: 2px; min-width: 180px; }
+
+.session-name a { font-weight: 600; color: #0f172a; text-decoration: none; }
+
+.session-name a:hover { color: var(--secondary); }
+
+.row-menu { display: inline-flex; align-items: center; gap: 6px; }

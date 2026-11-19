@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Opname - Abuya Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/wh-opname.css">
+</head>
+<body class="is-loading" data-page="wh-opname">
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="overlay" id="overlay"></div>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <section class="page-head-row">
+        <div class="page-head">
+          <div class="crumbs">
+            <span>ABWarehouse</span>
+            <span class="material-symbols-outlined">chevron_right</span>
+            <span class="crumb-active">Stock Opname</span>
+          </div>
+          <h1>Stock Opname</h1>
+          <p>Sesi stock opname bulanan setiap DC, lengkap dengan progres hitungnya.</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-primary" type="button" id="createBtn" hidden>
+            <span class="material-symbols-outlined">add</span><span>Buat Sesi</span>
+          </button>
+        </div>
+      </section>
+
+      <div class="notice" id="noDcNotice" hidden>
+        <span class="material-symbols-outlined">info</span>
+        <span id="noDcText">Akun kamu belum punya akses ke DC mana pun. Hubungi Master ya.</span>
+      </div>
+
+      <div id="area" hidden>
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="section-title">Distribution Center</h2>
+            <span class="panel-meta" id="dcMeta"></span>
+          </div>
+          <div class="branch-grid" id="dcGrid"></div>
+        </section>
+
+        <div class="tabs" id="statusTabs" role="tablist"></div>
+
+        <section class="panel table-panel">
+          <div class="toolbar">
+            <div class="search-box">
+              <span class="material-symbols-outlined">search</span>
+              <input type="search" id="fSearch" placeholder="Cari nama sesi...">
+            </div>
+            <div class="filters">
+              <button class="chip-reset" id="resetBtn" type="button" hidden>
+                <span class="material-symbols-outlined">filter_alt_off</span><span>Reset</span>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Sesi</th>
+                  <th>DC</th>
+                  <th>Tanggal</th>
+                  <th>Status</th>
+                  <th>Progres hitung</th>
+                  <th class="actions"></th>
+                </tr>
+              </thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <span id="pagerInfo">-</span>
+            <div class="pager-btns">
+              <button class="pager-btn" id="prevBtn" type="button" disabled>
+                <span class="material-symbols-outlined">chevron_left</span><span>Sebelumnya</span>
+              </button>
+              <span class="page-num" id="pageNum">-</span>
+              <button class="pager-btn" id="nextBtn" type="button" disabled>
+                <span>Selanjutnya</span><span class="material-symbols-outlined">chevron_right</span>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer class="footer" id="footer"></footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="js/app.js"></script>
+<script src="js/wh-opname.js"></script>
+</body>
+</html>
